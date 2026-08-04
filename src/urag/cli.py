@@ -34,6 +34,17 @@ from .retrieve import Retriever
 from .watcher import run_watch
 
 app = typer.Typer(help="urag: structure-aware, token-efficient RAG for projects", no_args_is_help=True)
+
+
+@app.callback(invoke_without_command=True)
+def _root_callback(
+    version: bool = typer.Option(False, "--version", help="show version and exit", show_default=False),
+) -> None:
+    if version:
+        from . import __version__
+
+        console.print(f"urag {__version__}")
+        raise typer.Exit()
 console = Console()
 
 _embedder_cache: dict[str, Embedder] = {}

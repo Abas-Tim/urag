@@ -19,9 +19,45 @@ then answers queries with small, cited evidence packets instead of whole files.
 
 ## Install
 
+urag is a Python CLI that installs anywhere uv or Python runs (Windows,
+macOS, Linux). Requires only the `urag` command plus `git` (for git-aware
+provenance); the embedding model (~25 MB) downloads on first use.
+
+**One-liner from the internet (needs uv; auto-installs uv if missing):**
+
 ```bash
-uv tool install -e .
-# or in a project:  uv add --dev urag
+# macOS / Linux
+curl -LsSf https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.ps1 | iex
+```
+
+**From PyPI (once published) — the standard install:**
+
+```bash
+uv tool install urag        # global `urag` on PATH (uv)
+pipx install urag           # same, via pipx
+# or in a project venv:     uv add urag
+
+urag --version
+```
+
+**Zero-install for agent harnesses (MCP)** — `uvx` downloads and caches on
+first use, no setup on new machines:
+
+```json
+{ "mcpServers": { "urag": { "command": ["uvx", "urag", "mcp", "--root", "/path/to/project"] } } }
+```
+
+`uvx` supports any install source, so until urag is on PyPI you can point
+it at the repo or a wheel: `uvx --from git+https://github.com/YOUR-ORG/urag urag mcp --root .`
+
+**From source (developers):**
+
+```bash
+git clone https://github.com/YOUR-ORG/urag
+cd urag && uv sync && uv run urag --help
 ```
 
 ## Usage

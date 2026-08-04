@@ -11,6 +11,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+# Legacy Windows consoles default to cp1252; project docs can contain any
+# unicode. Force UTF-8 before rich captures stdout.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 from .config import (
     UURAG_DIR,
     Config,
@@ -300,4 +308,9 @@ def doctor(root: Path = typer.Option(".", help="project root")):
 
 
 def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     app()

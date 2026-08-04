@@ -326,7 +326,7 @@ class Database:
             JOIN files f ON f.id = e.file_id
             WHERE e.callee = ? OR e.callee_full = ? OR e.callee_full LIKE ? ESCAPE '\\'
                OR e.callee_full LIKE ? ESCAPE '\\'
-            ORDER BY e.line
+            ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
             LIMIT ?
             """,
             (name, name, f"%.{esc}", f"%::{esc}", limit),

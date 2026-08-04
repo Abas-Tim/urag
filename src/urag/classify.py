@@ -71,7 +71,9 @@ def classify(query: str) -> str:
     if any(w in lowered for w in _CONCEPT_WORDS):
         return "local"
     if len(q.split()) <= 3:
-        return "symbol"
+        toks = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", q)
+        non_plain = any(_DOTTED.match(t) or _CAMEL.match(t) or _UPPER.match(t) for t in toks)
+        return "symbol" if non_plain else "local"
     return "local"
 
 

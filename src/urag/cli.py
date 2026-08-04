@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -176,6 +177,132 @@ def search(
                 if ev and "span" in ev:
                     console.print(f"  [dim]--- evidence (lines {ev['lines'][0]}-{ev['lines'][1]}, budget {result.budget_tokens} tok) ---[/dim]")
                     console.print(fit_evidence(ev["span"], result.budget_tokens))
+    finally:
+        db.close()
+
+
+@app.command("eval")
+def eval_cmd(
+    root: Path = typer.Option(".", help="project root"),
+    questions: Optional[Path] = typer.Option(None, "--questions", help="JSONL of {query, gold_file?, gold_unit_ids?}"),
+    autogen: Optional[int] = typer.Option(None, "--autogen", help="auto-generate N definition + N call questions with provable gold"),
+    top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
+    systems: Optional[str] = typer.Option(None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"),
+    judge_url: Optional[str] = typer.Option(None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="judge model name"),
+    judge_key: Optional[str] = typer.Option(None, "--judge-key", help="judge API key"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable report"),
+    report: Optional[Path] = typer.Option(None, "--report", help="write full report JSON to this file"),
+):
+    """Compare urag retrieval vs grep / chunk-RAG / whole-file baselines."""
+    from .eval import (
+        ChunkBaseline,
+        Hit,
+        OracleBaseline,
+        RgBaseline,
+        SystemRun,
+        aggregate,
+        autogen_questions,
+        judge_results,
+        load_questions,
+        resolve_question,
+        _metrics,
+    )
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    embedder = _embedder(cfg)
+    try:
+        if questions:
+            qs = load_questions(questions)
+        elif autogen:
+            qs = autogen_questions(db, autogen)
+        else:
+            qs = autogen_questions(db, 10)
+        qs = [resolve_question(db, q) for q in qs]
+
+        chosen = (systems or "urag-hybrid,urag-lexical,rg,chunk").split(",")
+        retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
+        rg = RgBaseline(cfg.project_root)
+        chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
+        oracle = OracleBaseline(cfg.project_root)
+
+        def urag_run(result) -> SystemRun:
+            hits = [
+                Hit(x.file_path, x.unit.id, max(1, len(f"{x.unit.signature} {x.unit.summary}") // 4))
+                for x in result.results
+            ]
+            return SystemRun(result.mode, hits, 0.0, sum(h.tokens for h in hits))
+
+        rows: dict[str, list[dict]] = {s: [] for s in chosen}
+        runs_by_system: dict[str, dict[int, object]] = {}
+        console.print(f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]")
+        for i, q in enumerate(qs):
+            t = time.perf_counter()
+            runs: dict[str, object] = {}
+            if "urag-hybrid" in chosen:
+                r = retriever.search(q.query, top_k=top_k, query_class="local")
+                run = urag_run(r)
+                run.seconds = time.perf_counter() - t
+                runs["urag-hybrid"] = run
+            if "urag-lexical" in chosen:
+                t = time.perf_counter()
+                r = retriever.search(q.query, top_k=top_k, mode="lexical")
+                run = urag_run(r)
+                run.seconds = time.perf_counter() - t
+                runs["urag-lexical"] = run
+            if "rg" in chosen:
+                runs["rg"] = rg.search(q.query, top_k, db)
+            if "chunk" in chosen:
+                runs["chunk"] = chunk.search(q.query, top_k, db)
+            if "oracle" in chosen:
+                runs["oracle"] = oracle.search(q, db)
+            for name, run in runs.items():
+                runs_by_system.setdefault(name, {})[i] = run
+                rows[name].append(_metrics(run, q, top_k))
+
+        agg = {name: aggregate(v) for name, v in rows.items()}
+        if json_out or report:
+            payload = {
+                "top_k": top_k,
+                "questions": [q.to_dict() for q in qs],
+                "systems": {name: agg.get(name, {}) for name in chosen},
+                "per_query": rows,
+            }
+            text = json.dumps(payload, ensure_ascii=False, indent=2)
+            if json_out:
+                print(text)
+            if report:
+                report.write_text(text, encoding="utf-8")
+        if not json_out:
+            t = Table(title=f"urag eval — {cfg.project_root} ({len(qs)} questions, top_k={top_k})")
+            t.add_column("system")
+            t.add_column("recall@k")
+            t.add_column("mrr")
+            t.add_column("tokens/run")
+            t.add_column("p50(s)")
+            t.add_column("p95(s)")
+            for name in chosen:
+                a = agg.get(name, {})
+                t.add_row(
+                    name,
+                    f"{a.get('unit_recall', 0):.2f}",
+                    f"{a.get('mrr', 0):.2f}",
+                    f"{a.get('mean_tokens', 0):.0f}",
+                    f"{a.get('p50_sec', 0)*1000:.0f}ms",
+                    f"{a.get('p95_sec', 0)*1000:.0f}ms",
+                )
+            console.print(t)
+
+        if judge_url:
+            console.print("[dim]running LLM judge tier...[/dim]")
+            scores = judge_results(
+                qs, runs_by_system, db, cfg, judge_url, judge_model or "gpt-4o-mini", judge_key or "",
+                progress=lambda m: console.print(m),
+            )
+            console.print("[bold]answer quality (correct 0-10):[/bold]")
+            for name in chosen:
+                console.print(f"  {name}: {scores.get(name, float('nan')):.2f}")
     finally:
         db.close()
 

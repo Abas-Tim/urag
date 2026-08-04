@@ -118,6 +118,32 @@ urag classify "what calls this method"   # -> impact (top_k=10, 6000 tok)
 urag search "why does it crash" --top-k 2
 ```
 
+## Evaluating retrieval quality (`urag eval`)
+
+Compares urag against the non-urag context baselines on the same questions:
+
+```bash
+# auto-generate provable-gold questions (definitions + callers), compare default systems
+urag eval --root . --autogen 10 --top-k 5
+
+# hand-written questions.jsonl: {"query": "...", "gold_file": "src/a.py"}
+urag eval --root . --questions questions.jsonl
+
+# add the LLM answer-quality tier (OpenAI-compatible endpoint)
+urag eval --root . --autogen 10 --judge-url https://api.openai.com/v1 --judge-model gpt-4o-mini --judge-key $KEY
+
+# machine-readable report
+urag eval --root . --autogen 10 --json --report eval.json
+```
+
+Systems compared per question: `urag-hybrid`, `urag-lexical`, `rg` (grep
+baseline), `chunk` (structure-free fixed-size chunk embeddings), and optional
+`oracle` (whole gold files). Metrics: **recall@k, MRR, tokens/retrieval,
+p50/p95 latency**. Definition and call questions get provable gold from the
+index itself (the unit's file / the actual `call_edges`), so evaluation works
+without hand labeling; doc/conceptual questions need a hand-written
+`--questions` file.
+
 ## Call graph (impact analysis)
 
 Every function body is scanned for call sites (python `call`, ts/js/go/rust/c/cpp

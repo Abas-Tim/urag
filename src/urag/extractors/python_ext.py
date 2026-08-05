@@ -8,7 +8,7 @@ from tree_sitter import Language, Node, Parser
 import tree_sitter_python as tsp
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, walk_calls
+from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, valid_aliases, walk_calls
 
 _LANG = Language(tsp.language())
 _PARSER: Parser | None = None
@@ -122,7 +122,7 @@ class PythonExtractor(Extractor):
                             )
                         )
             stack.extend(reversed(cur.named_children))
-        return out
+        return valid_aliases(out)
 
     def _walk(
         self,

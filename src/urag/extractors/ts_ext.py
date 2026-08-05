@@ -7,7 +7,7 @@ import tree_sitter_typescript as tsts
 import tree_sitter_javascript as tsjs
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, leading_comments, walk_calls
+from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, leading_comments, valid_aliases, walk_calls
 
 _FUNCTION_TYPES = {
     "function_declaration",
@@ -117,7 +117,7 @@ class TsExtractor(Extractor):
                             elif imported:
                                 out.append((imported, f"{mod}.{imported}"))
             stack.extend(reversed(cur.named_children))
-        return out
+        return valid_aliases(out)
 
     def _walk(
         self,

@@ -92,7 +92,12 @@ class Database:
         # thread at a time (timer thread in watch mode, main thread in CLI).
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.enable_load_extension(True)
+        # Python 3.12+ removed Connection.enable_load_extension; use the
+        # module-level API there (macOS/Homebrew builds hit this).
+        if hasattr(self.conn, "enable_load_extension"):
+            self.conn.enable_load_extension(True)
+        else:
+            sqlite3.enable_load_extension(self.conn, True)
         sqlite_vec.load(self.conn)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")

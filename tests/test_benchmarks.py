@@ -104,8 +104,8 @@ def test_autogen_alias_python(fdb):
     exists = [q for q in qs if q.target == "os.path.exists"]
     assert exists[0].gold_unit_ids == [_unit_id(fdb, "is_file")]
     fetch = [q for q in qs if q.target == "core.http.fetch"]
-    owners = {gid for q in fetch for gid in q.gold_unit_ids}
-    assert owners == {_unit_id(fdb, "get_user"), _unit_id(fdb, "get_item")}
+    assert len(fetch) == 1
+    assert set(fetch[0].gold_unit_ids) == {_unit_id(fdb, "get_user"), _unit_id(fdb, "get_item")}
     # fully-qualified target also matches the non-aliased last-segment caller
     validate = [q for q in qs if q.target == "core.auth.validate"]
     assert validate[0].gold_unit_ids == [_unit_id(fdb, "login")]

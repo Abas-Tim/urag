@@ -8,13 +8,16 @@ Usage (from repo root):
 
 Reports land in benchmarks/reports/<rev>-<timestamp>.json and a summary is
 printed per root. Run the same command on feat/benchmarks (before) and the
-feature branches (after) to quantify the improvement.
+feature branches (after) to quantify the improvement. The target root's
+.urag/ index is wiped and rebuilt fresh on every run so indexer schema
+changes never leak stale data into results.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -38,7 +41,10 @@ def git_head(cwd: Path) -> str:
 
 
 def bench(root: Path, transitive: int, alias: int, top_k: int, systems: str, out: Path) -> dict:
-    print(f"[bench] index {root}")
+    urag_dir = root / ".urag"
+    if urag_dir.exists():
+        shutil.rmtree(urag_dir)
+    print(f"[bench] fresh index {root}")
     r = sh(["urag", "init", "--root", str(root), "--full"], ROOT)
     if r.returncode != 0:
         print(r.stdout)

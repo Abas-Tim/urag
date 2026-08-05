@@ -198,6 +198,9 @@ class Indexer:
             calls = extractor.collect_calls(text)
             edges = self._map_calls(units, calls)
             self.db.replace_call_edges(file_id, edges)
+            aliases = extractor.collect_import_aliases(text)
+            if aliases:
+                self.db.replace_import_aliases(file_id, aliases)
         self.progress(f"  {rel}: {len(units)} units")
 
     # ---------- embeddings ----------

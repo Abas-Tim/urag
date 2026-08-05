@@ -180,6 +180,26 @@ class GoExtractor(Extractor):
         walk_calls(tree.root_node, source, {"call_expression"}, out)
         return out
 
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """`import alias "path"` -> (alias, dotted path)."""
+        tree = _parser("go").parse(source.encode("utf-8"))
+        out: list[tuple[str, str]] = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "import_spec":
+                alias = _field(cur, "name")
+                path = _field(cur, "path")
+                if alias is not None and path is not None:
+                    out.append(
+                        (
+                            source[alias.start_byte : alias.end_byte],
+                            source[path.start_byte : path.end_byte].strip('"').replace("/", "."),
+                        )
+                    )
+            stack.extend(reversed(cur.named_children))
+        return out
+
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
         body = _field(n, "body")
@@ -246,6 +266,23 @@ class RustExtractor(Extractor):
         tree = _parser("rust").parse(source.encode("utf-8"))
         out: list = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
+        return out
+
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """`use path as alias;` -> (alias, path)."""
+        out: list[tuple[str, str]] = []
+        tree = _parser("rust").parse(source.encode("utf-8"))
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "use_declaration":
+                text = source[cur.start_byte : cur.end_byte]
+                body = text.strip().rstrip(";").removeprefix("use ").strip()
+                if " as " in body:
+                    path, alias = [p.strip() for p in body.rsplit(" as ", 1)]
+                    if alias.isidentifier() and path:
+                        out.append((alias, path))
+            stack.extend(reversed(cur.named_children))
         return out
 
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
@@ -489,6 +526,30 @@ class CSharpExtractor(Extractor):
                                 byte_end=cur.end_byte,
                             )
                         )
+            stack.extend(reversed(cur.named_children))
+        return out
+
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """`using Alias = Namespace.Type;` -> (Alias, Namespace.Type)."""
+        import tree_sitter_c_sharp as tscs
+
+        p = Parser()
+        p.language = Language(tscs.language())
+        tree = p.parse(source.encode("utf-8"))
+        out: list[tuple[str, str]] = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "using_directive":
+                parts = [c for c in cur.named_children if c.type in ("identifier", "qualified_name")]
+                text = source[cur.start_byte : cur.end_byte]
+                if "=" in text and len(parts) == 2:
+                    out.append(
+                        (
+                            source[parts[0].start_byte : parts[0].end_byte],
+                            source[parts[1].start_byte : parts[1].end_byte],
+                        )
+                    )
             stack.extend(reversed(cur.named_children))
         return out
 

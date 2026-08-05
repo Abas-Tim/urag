@@ -77,6 +77,48 @@ class TsExtractor(Extractor):
         walk_calls(tree.root_node, source, {"call_expression"}, out)
         return out
 
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """(alias, target): `import * as ns`, `import {A as B}`, `import D`,
+        and bare named imports `import {A}`."""
+        tree = _parser(self.language).parse(source.encode("utf-8"))
+        out: list[tuple[str, str]] = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "import_statement":
+                clause = next((c for c in cur.named_children if c.type == "import_clause"), None)
+                source_node = cur.child_by_field_name("source")
+                mod = source[source_node.start_byte : source_node.end_byte].strip("'\"") if source_node else ""
+                mod = mod.strip("@").replace("/", ".")
+                if clause is None:
+                    continue
+                ns = next((c for c in clause.named_children if c.type == "namespace_import"), None)
+                if ns is not None:
+                    name = ns.child_by_field_name("name")
+                    if name is None:
+                        name = next((c for c in ns.named_children if c.type == "identifier"), None)
+                    if name:
+                        out.append((source[name.start_byte : name.end_byte], mod))
+                else:
+                    ident = next((c for c in clause.named_children if c.type == "identifier"), None)
+                    if ident:
+                        out.append((source[ident.start_byte : ident.end_byte], f"{mod}.default"))
+                    for ni in clause.named_children:
+                        if ni.type != "named_imports":
+                            continue
+                        for spec in ni.named_children:
+                            if spec.type != "import_specifier":
+                                continue
+                            name = spec.child_by_field_name("name")
+                            alias = spec.child_by_field_name("alias")
+                            imported = source[name.start_byte : name.end_byte] if name else ""
+                            if alias:
+                                out.append((source[alias.start_byte : alias.end_byte], f"{mod}.{imported}"))
+                            elif imported:
+                                out.append((imported, f"{mod}.{imported}"))
+            stack.extend(reversed(cur.named_children))
+        return out
+
     def _walk(
         self,
         node: Node,

@@ -20,6 +20,10 @@ class Extractor(ABC):
         """Collect call sites. Default: no calls known."""
         return []
 
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """Import bindings (alias, fully-qualified target). Default: none."""
+        return []
+
 
 def split_callee(full: str) -> str:
     """Last segment of a dotted / :: / / chain."""

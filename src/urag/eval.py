@@ -412,13 +412,13 @@ def _unit_at_byte(db: Database, file_id: int, byte_start: int) -> int | None:
 
 
 def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
-    """Aliased call sites, gold = the unit containing each call; query uses the
-    fully-qualified target chain (e.g. `import os.path as op` + `op.exists()` ->
-    "who calls os.path.exists")."""
+    """Aliased call sites, gold = the units owning those call sites; one
+    question per fully-qualified target chain (e.g. `import os.path as op` +
+    `op.exists()` -> "who calls os.path.exists")."""
     from .extractors import get_extractor
 
     files = db.conn.execute("SELECT id, path, language FROM files").fetchall()
-    qs: list[Question] = []
+    owners: dict[str, tuple[list[int], str]] = {}
     for f in files:
         if not f["language"] or f["language"] == "markdown":
             continue
@@ -435,7 +435,6 @@ def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
         ext = get_extractor(f["language"])
         if ext is None:
             continue
-        seen: set[tuple[str, int]] = set()
         for c in ext.collect_calls(text):
             for alias, target in aliases.items():
                 prefix = alias + "."
@@ -448,20 +447,22 @@ def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
                 owner = _unit_at_byte(db, f["id"], c.byte_start)
                 if owner is None:
                     continue
-                if (real, owner) in seen:
-                    continue
-                seen.add((real, owner))
-                qs.append(
-                    Question(
-                        query=f"who calls {real}",
-                        gold_unit_ids=[owner],
-                        gold_file=f["path"],
-                        label="alias",
-                        target=real,
-                    )
-                )
-                if len(qs) >= n:
-                    return qs
+                cur = owners.setdefault(real, ([], f["path"]))
+                if owner not in cur[0]:
+                    cur[0].append(owner)
+    qs: list[Question] = []
+    for real, (ids, path) in owners.items():
+        qs.append(
+            Question(
+                query=f"who calls {real}",
+                gold_unit_ids=ids,
+                gold_file=path,
+                label="alias",
+                target=real,
+            )
+        )
+        if len(qs) >= n:
+            break
     return qs
 
 

@@ -368,6 +368,8 @@ def callers(
                 f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
             )
             console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
+            if r.resolved_target:
+                console.print(f"  [cyan]via alias -> {r.resolved_target}[/cyan]")
     finally:
         db.close()
 

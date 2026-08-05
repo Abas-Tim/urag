@@ -93,12 +93,21 @@ class Database:
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         # Python 3.12+ removed Connection.enable_load_extension; use the
-        # module-level API there (macOS/Homebrew builds hit this).
-        if hasattr(self.conn, "enable_load_extension"):
-            self.conn.enable_load_extension(True)
-        else:
-            sqlite3.enable_load_extension(self.conn, True)
-        sqlite_vec.load(self.conn)
+        # module-level API there. Some CPython builds (e.g. the GitHub macOS
+        # runner's framework build) lack extension loading entirely.
+        try:
+            if hasattr(self.conn, "enable_load_extension"):
+                self.conn.enable_load_extension(True)
+            else:
+                sqlite3.enable_load_extension(self.conn, True)
+            sqlite_vec.load(self.conn)
+        except (AttributeError, sqlite3.OperationalError) as exc:
+            raise RuntimeError(
+                "sqlite-vec could not be loaded: this Python's sqlite3 module was "
+                "built without loadable-extension support. Use a uv-managed Python "
+                "(`uv python install 3.12` + a `.python-version` file) or a build "
+                "compiled with --enable-loadable-sqlite-extensions."
+            ) from exc
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._init_schema()

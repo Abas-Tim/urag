@@ -13,6 +13,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    # only uv-managed interpreters: their CPython builds ship with loadable
+    # SQLite extension support (sqlite-vec needs it); the macOS runner's
+    # preinstalled framework build omits it.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

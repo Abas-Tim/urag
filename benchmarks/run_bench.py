@@ -29,7 +29,9 @@ REPORTS = ROOT / "benchmarks" / "reports"
 
 
 def sh(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(
+        args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def git_head(cwd: Path) -> str:

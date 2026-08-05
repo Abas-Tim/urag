@@ -15,7 +15,7 @@ import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, collapse_ws, leading_comments, split_callee, walk_calls
+from .base import Extractor, collapse_ws, leading_comments, split_callee, valid_aliases, walk_calls
 
 _PARSERS: dict[str, Parser] = {}
 
@@ -198,7 +198,7 @@ class GoExtractor(Extractor):
                         )
                     )
             stack.extend(reversed(cur.named_children))
-        return out
+        return valid_aliases(out)
 
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
@@ -283,7 +283,7 @@ class RustExtractor(Extractor):
                     if alias.isidentifier() and path:
                         out.append((alias, path))
             stack.extend(reversed(cur.named_children))
-        return out
+        return valid_aliases(out)
 
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
@@ -551,7 +551,7 @@ class CSharpExtractor(Extractor):
                         )
                     )
             stack.extend(reversed(cur.named_children))
-        return out
+        return valid_aliases(out)
 
     def _walk(self, node: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         for child in node.named_children:

@@ -70,6 +70,8 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
     if r.caller_of:
         packet["calls"] = r.caller_of
         packet["call_line"] = r.call_line
+    if r.hop > 0:
+        packet["hop"] = r.hop
     if include_evidence and u.id is not None:
         ev = db.load_evidence(u.id)
         if ev and "span" in ev:
@@ -152,16 +154,22 @@ def create_server(root: Path | None = None) -> MCPServer:
         description=(
             "Exact call-graph lookup: returns the units that call `name`, "
             "with the call-site line. The precise way to answer 'what calls "
-            "X' / 'what breaks if X changes'."
+            "X' / 'what breaks if X changes'. Pass depth > 1 to also walk "
+            "callers-of-callers (multi-hop traversal); each result then "
+            "carries its `hop` (1 = direct caller)."
         ),
     )
-    def callers(name: str, limit: int = 20) -> str:
+    def callers(name: str, limit: int = 20, depth: int = 1) -> str:
         db = _open(cfg)
         try:
-            result = Retriever(cfg, db, _embedder(cfg), git).search_callers(name, limit=limit)
+            retriever = Retriever(cfg, db, _embedder(cfg), git)
+            if depth > 1:
+                result = retriever.search_transitive(name, depth=depth, limit=limit)
+            else:
+                result = retriever.search_callers(name, limit=limit)
             packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
             return json.dumps(
-                {"query": name, "mode": "calls", "count": len(packets), "results": packets},
+                {"query": name, "mode": "calls", "depth": depth, "count": len(packets), "results": packets},
                 ensure_ascii=False,
             )
         finally:

@@ -365,6 +365,34 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def transitive_callers(
+        self, name: str, max_depth: int = 3, limit: int = 30
+    ) -> list[dict]:
+        """BFS over call_edges: all transitive callers of `name` (callers-of-
+        callers, ...). Each row gains `hop` (1 = direct caller). Cycles are
+        handled via a visited set; each unit appears at its shortest hop."""
+        name = name.strip()
+        if not name:
+            return []
+        visited: dict[int, dict] = {}
+        frontier: list[str] = [name]
+        for hop in range(1, max_depth + 1):
+            nxt: list[str] = []
+            for callee in frontier:
+                for row in self.callers(callee, limit=10000):
+                    uid = row["unit"].id
+                    if uid in visited:
+                        continue
+                    visited[uid] = row | {"hop": hop}
+                    u = row["unit"]
+                    nxt.append(u.name)
+                    if u.qualname and u.qualname != u.name:
+                        nxt.append(u.qualname)
+            if not nxt:
+                break
+            frontier = list(dict.fromkeys(nxt))
+        return [visited[uid] for uid in visited][:limit]
+
     # ---------- evidence (L2) ----------
 
     def load_evidence(self, unit_id: int) -> dict | None:

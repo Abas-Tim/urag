@@ -233,6 +233,20 @@ class Retriever:
         self._enrich(results)
         return SearchResult(results, "calls", f"callers of {name}", "impact", BUDGETS["impact"]["tokens"])
 
+    def search_transitive(self, name: str, depth: int = 3, limit: int = 20) -> SearchResult:
+        """Multi-hop call-graph lookup: callers-of-callers up to `depth` hops."""
+        hits = self.db.transitive_callers(name, max_depth=depth, limit=limit)
+        results = [
+            RetrievedUnit(
+                h["unit"], h["path"], score=1.0,
+                caller_of=h["callee_full"] or name, call_line=h["line"],
+                hop=h.get("hop", 0),
+            )
+            for h in hits
+        ]
+        self._enrich(results)
+        return SearchResult(results, "calls", f"transitive callers of {name} (depth {depth})", "impact", BUDGETS["impact"]["tokens"])
+
     def get(self, unit_id: int) -> dict | None:
         ev = self.db.load_evidence(unit_id)
         if ev and self.git and ev.get("commit"):

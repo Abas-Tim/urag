@@ -348,14 +348,19 @@ def callers(
     name: str = typer.Argument(..., help="symbol name to find callers of"),
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
+    depth: int = typer.Option(1, "--depth", min=1, help="hop depth; 1 = direct callers, >1 = callers-of-callers"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
-    """Who calls a symbol? Exact call-graph lookup."""
+    """Who calls a symbol? Exact call-graph lookup (--depth for multi-hop)."""
     from .git_aware import Git
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).search_callers(name, limit=top_k or 20)
+        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        if depth > 1:
+            result = retriever.search_transitive(name, depth=depth, limit=top_k or 20)
+        else:
+            result = retriever.search_callers(name, limit=top_k or 20)
         if json_out:
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return
@@ -368,6 +373,8 @@ def callers(
                 f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
             )
             console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
+            if r.hop > 1:
+                console.print(f"  [cyan]hop {r.hop}[/cyan]")
     finally:
         db.close()
 

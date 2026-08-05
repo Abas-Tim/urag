@@ -27,10 +27,10 @@ provenance); the embedding model (~25 MB) downloads on first use.
 
 ```bash
 # macOS / Linux
-curl -LsSf https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.sh | sh
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.ps1 | iex
+irm https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.ps1 | iex
 ```
 
 **From PyPI (once published) — the standard install:**
@@ -51,12 +51,12 @@ first use, no setup on new machines:
 ```
 
 `uvx` supports any install source, so until urag is on PyPI you can point
-it at the repo or a wheel: `uvx --from git+https://github.com/YOUR-ORG/urag urag mcp --root .`
+it at the repo or a wheel: `uvx --from git+https://github.com/Abas-Tim/urag urag mcp --root .`
 
 **From source (developers):**
 
 ```bash
-git clone https://github.com/YOUR-ORG/urag
+git clone https://github.com/Abas-Tim/urag
 cd urag && uv sync && uv run urag --help
 ```
 

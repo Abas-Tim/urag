@@ -1,9 +1,9 @@
 # urag installer for Windows (PowerShell 5.1+).
 #
 # Usage:
-#   irm https://YOUR-ORG.github.io/urag/install.ps1 | iex
+#   irm https://Abas-Tim.github.io/urag/install.ps1 | iex
 #   # or from the repo:
-#   irm https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.ps1 | iex
 #
 # Env overrides:
 #   URAG_PACKAGE  package spec to install (default: urag -> PyPI)

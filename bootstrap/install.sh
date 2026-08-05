@@ -2,9 +2,9 @@
 # urag installer for macOS / Linux (POSIX sh).
 #
 # Usage:
-#   curl -LsSf https://YOUR-ORG.github.io/urag/install.sh | sh
+#   curl -LsSf https://Abas-Tim.github.io/urag/install.sh | sh
 #   # or from the repo:
-#   curl -LsSf https://raw.githubusercontent.com/YOUR-ORG/urag/main/bootstrap/install.sh | sh
+#   curl -LsSf https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.sh | sh
 #
 # Env overrides:
 #   URAG_PACKAGE  package spec to install (default: urag -> PyPI)

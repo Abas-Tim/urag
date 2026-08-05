@@ -47,9 +47,9 @@ dependencies = [
 urag = "urag.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/YOUR-ORG/urag"
-Source = "https://github.com/YOUR-ORG/urag"
-Issues = "https://github.com/YOUR-ORG/urag/issues"
+Homepage = "https://github.com/Abas-Tim/urag"
+Source = "https://github.com/Abas-Tim/urag"
+Issues = "https://github.com/Abas-Tim/urag/issues"
 
 [build-system]
 requires = ["hatchling"]

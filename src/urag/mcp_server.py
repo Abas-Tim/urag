@@ -72,6 +72,8 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
         packet["call_line"] = r.call_line
     if r.hop > 0:
         packet["hop"] = r.hop
+    if r.resolved_target:
+        packet["resolved_to"] = r.resolved_target
     if include_evidence and u.id is not None:
         ev = db.load_evidence(u.id)
         if ev and "span" in ev:

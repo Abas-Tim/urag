@@ -375,6 +375,8 @@ def callers(
             console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
             if r.hop > 1:
                 console.print(f"  [cyan]hop {r.hop}[/cyan]")
+            if r.resolved_target:
+                console.print(f"  [cyan]via alias -> {r.resolved_target}[/cyan]")
     finally:
         db.close()
 

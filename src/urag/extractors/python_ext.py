@@ -78,6 +78,52 @@ class PythonExtractor(Extractor):
         walk_calls(tree.root_node, source, {"call"}, out)
         return out
 
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """(alias, fully-qualified target) for `import x as y`, `from m import n`
+        and `from m import n as y`."""
+        tree = _parser().parse(source.encode("utf-8"))
+        out: list[tuple[str, str]] = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "import_statement":
+                for child in cur.named_children:
+                    if child.type == "aliased_import":
+                        name = child.child_by_field_name("name")
+                        alias = child.child_by_field_name("alias")
+                        if name is not None and alias is not None:
+                            out.append(
+                                (
+                                    source[alias.start_byte : alias.end_byte],
+                                    source[name.start_byte : name.end_byte],
+                                )
+                            )
+            elif cur.type == "import_from_statement":
+                mod = cur.child_by_field_name("module_name")
+                mod_name = source[mod.start_byte : mod.end_byte] if mod else ""
+                for child in cur.named_children:
+                    if child == mod:
+                        continue
+                    if child.type == "aliased_import":
+                        name = child.child_by_field_name("name")
+                        alias = child.child_by_field_name("alias")
+                        if name is not None and alias is not None:
+                            out.append(
+                                (
+                                    source[alias.start_byte : alias.end_byte],
+                                    f"{mod_name}.{source[name.start_byte : name.end_byte]}",
+                                )
+                            )
+                    elif child.type == "dotted_name":
+                        out.append(
+                            (
+                                source[child.start_byte : child.end_byte],
+                                f"{mod_name}.{source[child.start_byte : child.end_byte]}",
+                            )
+                        )
+            stack.extend(reversed(cur.named_children))
+        return out
+
     def _walk(
         self,
         node: Node,

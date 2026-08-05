@@ -2,66 +2,66 @@
   "top_k": 5,
   "questions": [
     {
-      "query": "where is other_entry defined",
+      "query": "where is stage2 defined",
       "label": "definition",
       "gold_file": "core/chain.py",
       "gold_unit_ids": [
-        14
+        11
       ],
       "target": "",
       "depth": 1,
       "gold_hops": {}
     },
     {
-      "query": "where is Client defined",
-      "label": "definition",
-      "gold_file": "sdk/core.ts",
-      "gold_unit_ids": [
-        28
-      ],
-      "target": "",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "where is stage3 defined",
-      "label": "definition",
-      "gold_file": "core/chain.py",
-      "gold_unit_ids": [
-        12
-      ],
-      "target": "",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "where is login defined",
-      "label": "definition",
-      "gold_file": "app/auth.py",
-      "gold_unit_ids": [
-        5
-      ],
-      "target": "",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "where is check defined",
-      "label": "definition",
-      "gold_file": "app/local.py",
-      "gold_unit_ids": [
-        7
-      ],
-      "target": "",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "where is run defined",
+      "query": "where is ping defined",
       "label": "definition",
       "gold_file": "sdk/app.ts",
       "gold_unit_ids": [
-        26
+        27
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is stop defined",
+      "label": "definition",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        13
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is validate defined",
+      "label": "definition",
+      "gold_file": "app/local.py",
+      "gold_unit_ids": [
+        6
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is Client.open defined",
+      "label": "definition",
+      "gold_file": "sdk/core.ts",
+      "gold_unit_ids": [
+        30
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is connect defined",
+      "label": "definition",
+      "gold_file": "sdk/net.ts",
+      "gold_unit_ids": [
+        32
       ],
       "target": "",
       "depth": 1,
@@ -79,57 +79,69 @@
       "gold_hops": {}
     },
     {
-      "query": "where is is_dir defined",
-      "label": "definition",
-      "gold_file": "core/utils.py",
-      "gold_unit_ids": [
-        18
-      ],
-      "target": "",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "where is stage2 defined",
+      "query": "where is entry defined",
       "label": "definition",
       "gold_file": "core/chain.py",
       "gold_unit_ids": [
-        11
+        9
       ],
       "target": "",
       "depth": 1,
       "gold_hops": {}
     },
     {
-      "query": "where is main defined",
+      "query": "where is other_entry defined",
       "label": "definition",
-      "gold_file": "goapp/main.go",
+      "gold_file": "core/chain.py",
       "gold_unit_ids": [
-        20
+        14
       ],
       "target": "",
       "depth": 1,
       "gold_hops": {}
     },
     {
-      "query": "what calls Info",
-      "label": "call",
-      "gold_file": "mvc/Program.cs",
+      "query": "where is check defined",
+      "label": "definition",
+      "gold_file": "app/local.py",
       "gold_unit_ids": [
-        23
+        7
       ],
-      "target": "Info",
+      "target": "",
       "depth": 1,
       "gold_hops": {}
     },
     {
-      "query": "what calls Start",
+      "query": "what calls connect",
       "label": "call",
-      "gold_file": "goapp/main.go",
+      "gold_file": "sdk/app.ts",
       "gold_unit_ids": [
-        20
+        27
       ],
-      "target": "Start",
+      "target": "connect",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls http_fetch",
+      "label": "call",
+      "gold_file": "app/api.py",
+      "gold_unit_ids": [
+        2,
+        3
+      ],
+      "target": "http_fetch",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls makeClient",
+      "label": "call",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        26
+      ],
+      "target": "makeClient",
       "depth": 1,
       "gold_hops": {}
     },
@@ -142,6 +154,40 @@
         7
       ],
       "target": "validate",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls exists",
+      "label": "call",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        17
+      ],
+      "target": "exists",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls stage2",
+      "label": "call",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        10,
+        14
+      ],
+      "target": "stage2",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls Start",
+      "label": "call",
+      "gold_file": "goapp/main.go",
+      "gold_unit_ids": [
+        20
+      ],
+      "target": "Start",
       "depth": 1,
       "gold_hops": {}
     },
@@ -179,48 +225,40 @@
       "gold_hops": {}
     },
     {
-      "query": "what calls stage1",
-      "label": "call",
+      "query": "who transitively calls stage3",
+      "label": "transitive",
       "gold_file": "core/chain.py",
       "gold_unit_ids": [
+        11,
+        10,
+        14,
         9
       ],
-      "target": "stage1",
-      "depth": 1,
-      "gold_hops": {}
+      "target": "stage3",
+      "depth": 3,
+      "gold_hops": {
+        "11": 1,
+        "10": 2,
+        "14": 2,
+        "9": 3
+      }
     },
     {
-      "query": "what calls connect",
-      "label": "call",
-      "gold_file": "sdk/app.ts",
+      "query": "who transitively calls stage2",
+      "label": "transitive",
+      "gold_file": "core/chain.py",
       "gold_unit_ids": [
-        27
+        10,
+        14,
+        9
       ],
-      "target": "connect",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "what calls exists",
-      "label": "call",
-      "gold_file": "core/utils.py",
-      "gold_unit_ids": [
-        17
-      ],
-      "target": "exists",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "what calls makeClient",
-      "label": "call",
-      "gold_file": "sdk/app.ts",
-      "gold_unit_ids": [
-        26
-      ],
-      "target": "makeClient",
-      "depth": 1,
-      "gold_hops": {}
+      "target": "stage2",
+      "depth": 3,
+      "gold_hops": {
+        "10": 1,
+        "14": 1,
+        "9": 2
+      }
     },
     {
       "query": "who transitively calls stop",
@@ -242,23 +280,6 @@
       }
     },
     {
-      "query": "who transitively calls stage2",
-      "label": "transitive",
-      "gold_file": "core/chain.py",
-      "gold_unit_ids": [
-        10,
-        14,
-        9
-      ],
-      "target": "stage2",
-      "depth": 3,
-      "gold_hops": {
-        "10": 1,
-        "14": 1,
-        "9": 2
-      }
-    },
-    {
       "query": "who transitively calls open",
       "label": "transitive",
       "gold_file": "sdk/core.ts",
@@ -274,40 +295,11 @@
       }
     },
     {
-      "query": "who transitively calls stage3",
-      "label": "transitive",
-      "gold_file": "core/chain.py",
-      "gold_unit_ids": [
-        11,
-        10,
-        14,
-        9
-      ],
-      "target": "stage3",
-      "depth": 3,
-      "gold_hops": {
-        "11": 1,
-        "10": 2,
-        "14": 2,
-        "9": 3
-      }
-    },
-    {
       "query": "who calls core.http.fetch",
       "label": "alias",
       "gold_file": "app/api.py",
       "gold_unit_ids": [
-        2
-      ],
-      "target": "core.http.fetch",
-      "depth": 1,
-      "gold_hops": {}
-    },
-    {
-      "query": "who calls core.http.fetch",
-      "label": "alias",
-      "gold_file": "app/api.py",
-      "gold_unit_ids": [
+        2,
         3
       ],
       "target": "core.http.fetch",
@@ -394,40 +386,40 @@
   ],
   "systems": {
     "urag-callers": {
-      "n": 23,
-      "unit_recall": 0.6086956521739131,
-      "file_recall": 0.6086956521739131,
-      "precision": 0.6086956521739131,
+      "n": 22,
+      "unit_recall": 0.6363636363636364,
+      "file_recall": 0.6363636363636364,
+      "precision": 0.6363636363636364,
       "indirect_recall": 0.0,
-      "mrr": 0.6086956521739131,
-      "mean_tokens": 2.652173913043478,
-      "mean_sec": 0.0001221782624033158,
-      "p50_sec": 0.00011419999646022916,
-      "p95_sec": 0.00018309999722987413
+      "mrr": 0.6363636363636364,
+      "mean_tokens": 3.1818181818181817,
+      "mean_sec": 0.0001149545450144532,
+      "p50_sec": 9.960000170394778e-05,
+      "p95_sec": 0.00018420000560581684
     },
     "urag-transitive": {
-      "n": 23,
-      "unit_recall": 0.6086956521739131,
-      "file_recall": 0.6086956521739131,
-      "precision": 0.6086956521739131,
+      "n": 22,
+      "unit_recall": 0.6363636363636364,
+      "file_recall": 0.6363636363636364,
+      "precision": 0.6363636363636364,
       "indirect_recall": 1.0,
-      "mrr": 0.6086956521739131,
-      "mean_tokens": 4.0,
-      "mean_sec": 0.00012921738822984955,
-      "p50_sec": 8.999998681247234e-05,
-      "p95_sec": 0.0003092000260949135
+      "mrr": 0.6363636363636364,
+      "mean_tokens": 4.590909090909091,
+      "mean_sec": 0.00010814544988203455,
+      "p50_sec": 8.729996625334024e-05,
+      "p95_sec": 0.00024240004131570458
     },
     "urag-hybrid": {
-      "n": 33,
-      "unit_recall": 0.6060606060606061,
-      "file_recall": 0.8787878787878788,
-      "precision": 0.13333333333333333,
+      "n": 32,
+      "unit_recall": 0.65625,
+      "file_recall": 0.90625,
+      "precision": 0.14375000000000002,
       "indirect_recall": 0.16666666666666666,
-      "mrr": 0.4732323232323232,
-      "mean_tokens": 24.181818181818183,
-      "mean_sec": 0.004309809092912033,
-      "p50_sec": 0.00327000004472211,
-      "p95_sec": 0.004187099984847009
+      "mrr": 0.48802083333333335,
+      "mean_tokens": 25.03125,
+      "mean_sec": 0.0042701593793026404,
+      "p50_sec": 0.003175400022882968,
+      "p95_sec": 0.0043670000159181654
     }
   },
   "per_query": {
@@ -438,68 +430,8 @@
         "precision": 1.0,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 0.00018550001550465822,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 0.00016249995678663254,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 7,
-        "seconds": 0.00013920001219958067,
-        "n_hits": 2
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 4,
-        "seconds": 0.00012370001059025526,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 4,
-        "seconds": 0.00010830000974237919,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 0.00012370001059025526,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 9.99000039882958e-05,
+        "tokens": 8,
+        "seconds": 0.00021119997836649418,
         "n_hits": 1
       },
       {
@@ -509,7 +441,57 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 8,
-        "seconds": 0.00012420001439750195,
+        "seconds": 0.00012260000221431255,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 0.00011570000788196921,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00018420000560581684,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.0001488000270910561,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00014240003656595945,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 9.540002793073654e-05,
         "n_hits": 1
       },
       {
@@ -519,7 +501,7 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 4,
-        "seconds": 0.00010160001693293452,
+        "seconds": 9.549997048452497e-05,
         "n_hits": 1
       },
       {
@@ -528,8 +510,18 @@
         "precision": 1.0,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 5,
-        "seconds": 0.0001419999753125012,
+        "tokens": 4,
+        "seconds": 0.00012009998317807913,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.0001564000267535448,
         "n_hits": 1
       },
       {
@@ -539,7 +531,7 @@
         "indirect_recall": 0.0,
         "mrr": 1.0,
         "tokens": 3,
-        "seconds": 0.00015470001380890608,
+        "seconds": 9.560002945363522e-05,
         "n_hits": 1
       },
       {
@@ -549,7 +541,7 @@
         "indirect_recall": 0.0,
         "mrr": 1.0,
         "tokens": 7,
-        "seconds": 0.00018309999722987413,
+        "seconds": 0.00013319996651262045,
         "n_hits": 2
       },
       {
@@ -558,8 +550,8 @@
         "precision": 1.0,
         "indirect_recall": 0.0,
         "mrr": 1.0,
-        "tokens": 4,
-        "seconds": 0.00011639995500445366,
+        "tokens": 3,
+        "seconds": 9.109999518841505e-05,
         "n_hits": 1
       },
       {
@@ -568,8 +560,8 @@
         "precision": 1.0,
         "indirect_recall": 0.0,
         "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 0.0001078000059351325,
+        "tokens": 4,
+        "seconds": 9.53000271692872e-05,
         "n_hits": 1
       },
       {
@@ -579,7 +571,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 8.610001532360911e-05,
+        "seconds": 0.00010229996405541897,
         "n_hits": 0
       },
       {
@@ -589,7 +581,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 9.929999941959977e-05,
+        "seconds": 9.960000170394778e-05,
         "n_hits": 0
       },
       {
@@ -599,7 +591,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 9.879999561235309e-05,
+        "seconds": 8.909997995942831e-05,
         "n_hits": 0
       },
       {
@@ -609,7 +601,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 0.00010050000855699182,
+        "seconds": 9.320001117885113e-05,
         "n_hits": 0
       },
       {
@@ -619,7 +611,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 0.00011419999646022916,
+        "seconds": 9.28999506868422e-05,
         "n_hits": 0
       },
       {
@@ -629,7 +621,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 0.00010279996786266565,
+        "seconds": 8.369999704882503e-05,
         "n_hits": 0
       },
       {
@@ -639,7 +631,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 8.510000770911574e-05,
+        "seconds": 7.680000271648169e-05,
         "n_hits": 0
       },
       {
@@ -649,17 +641,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 0.00010060000931844115,
-        "n_hits": 0
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 0.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 0,
-        "seconds": 0.0001501000369898975,
+        "seconds": 8.38999985717237e-05,
         "n_hits": 0
       }
     ],
@@ -670,68 +652,8 @@
         "precision": 1.0,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 9.300000965595245e-05,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 0.00015620002523064613,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 7,
-        "seconds": 0.00010679999832063913,
-        "n_hits": 2
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 4,
-        "seconds": 8.9899986051023e-05,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 4,
-        "seconds": 7.010000990703702e-05,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 7.500004721805453e-05,
-        "n_hits": 1
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 1.0,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 3,
-        "seconds": 6.649998249486089e-05,
+        "tokens": 8,
+        "seconds": 8.120003622025251e-05,
         "n_hits": 1
       },
       {
@@ -741,7 +663,57 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 8,
-        "seconds": 8.999998681247234e-05,
+        "seconds": 8.810003055259585e-05,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 8.729996625334024e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00014659995213150978,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.00010819995077326894,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00010869995458051562,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 6.609997944906354e-05,
         "n_hits": 1
       },
       {
@@ -751,7 +723,7 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 4,
-        "seconds": 0.00011279998579993844,
+        "seconds": 6.619998021051288e-05,
         "n_hits": 1
       },
       {
@@ -760,8 +732,18 @@
         "precision": 1.0,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 5,
-        "seconds": 0.00018990004900842905,
+        "tokens": 4,
+        "seconds": 8.809997234493494e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00010599999222904444,
         "n_hits": 1
       },
       {
@@ -771,7 +753,7 @@
         "indirect_recall": 1.0,
         "mrr": 1.0,
         "tokens": 13,
-        "seconds": 0.00038709997897967696,
+        "seconds": 0.00021869997726753354,
         "n_hits": 4
       },
       {
@@ -781,7 +763,7 @@
         "indirect_recall": 1.0,
         "mrr": 1.0,
         "tokens": 10,
-        "seconds": 0.0003092000260949135,
+        "seconds": 0.00027359998784959316,
         "n_hits": 3
       },
       {
@@ -790,9 +772,9 @@
         "precision": 1.0,
         "indirect_recall": 1.0,
         "mrr": 1.0,
-        "tokens": 12,
-        "seconds": 0.00025129999266937375,
-        "n_hits": 2
+        "tokens": 13,
+        "seconds": 0.00024240004131570458,
+        "n_hits": 4
       },
       {
         "unit_recall": 1.0,
@@ -800,9 +782,9 @@
         "precision": 1.0,
         "indirect_recall": 1.0,
         "mrr": 1.0,
-        "tokens": 13,
-        "seconds": 0.00028039998142048717,
-        "n_hits": 4
+        "tokens": 12,
+        "seconds": 0.00018149998504668474,
+        "n_hits": 2
       },
       {
         "unit_recall": 0.0,
@@ -811,7 +793,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 5.7999975979328156e-05,
+        "seconds": 6.420002318918705e-05,
         "n_hits": 0
       },
       {
@@ -821,7 +803,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 6.450002547353506e-05,
+        "seconds": 8.060003165155649e-05,
         "n_hits": 0
       },
       {
@@ -831,7 +813,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 6.399996345862746e-05,
+        "seconds": 6.779999239370227e-05,
         "n_hits": 0
       },
       {
@@ -841,7 +823,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 7.059995550662279e-05,
+        "seconds": 6.960000609979033e-05,
         "n_hits": 0
       },
       {
@@ -851,7 +833,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 8.099997648969293e-05,
+        "seconds": 6.230000872164965e-05,
         "n_hits": 0
       },
       {
@@ -861,7 +843,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 6.370001938194036e-05,
+        "seconds": 7.850001566112041e-05,
         "n_hits": 0
       },
       {
@@ -871,7 +853,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 5.909998435527086e-05,
+        "seconds": 4.630000330507755e-05,
         "n_hits": 0
       },
       {
@@ -881,17 +863,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 0,
-        "seconds": 9.82999918051064e-05,
-        "n_hits": 0
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 0.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 0,
-        "seconds": 0.00013459997717291117,
+        "seconds": 4.7200010158121586e-05,
         "n_hits": 0
       }
     ],
@@ -902,8 +874,8 @@
         "precision": 0.2,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 23,
-        "seconds": 0.036594899953342974,
+        "tokens": 15,
+        "seconds": 0.03650839999318123,
         "n_hits": 5
       },
       {
@@ -912,8 +884,8 @@
         "precision": 0.2,
         "indirect_recall": null,
         "mrr": 1.0,
-        "tokens": 27,
-        "seconds": 0.004009200027212501,
+        "tokens": 37,
+        "seconds": 0.0043670000159181654,
         "n_hits": 5
       },
       {
@@ -923,7 +895,37 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 15,
-        "seconds": 0.003751400043256581,
+        "seconds": 0.0037617000052705407,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 24,
+        "seconds": 0.003341200004797429,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 28,
+        "seconds": 0.004027299990411848,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 32,
+        "seconds": 0.00330250000115484,
         "n_hits": 5
       },
       {
@@ -933,7 +935,27 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 25,
-        "seconds": 0.0036409999593161047,
+        "seconds": 0.0030647999956272542,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 22,
+        "seconds": 0.003034800000023097,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 23,
+        "seconds": 0.003175400022882968,
         "n_hits": 5
       },
       {
@@ -943,127 +965,7 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 19,
-        "seconds": 0.003696400031913072,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 21,
-        "seconds": 0.002962099970318377,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 25,
-        "seconds": 0.002799800015054643,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 21,
-        "seconds": 0.0028269000467844307,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 15,
-        "seconds": 0.0026803999789990485,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 20,
-        "seconds": 0.0029789000400342047,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 0.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 26,
-        "seconds": 0.003579300013370812,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 17,
-        "seconds": 0.0027263000374659896,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 0.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 0.3333333333333333,
-        "tokens": 23,
-        "seconds": 0.002870700031053275,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 22,
-        "seconds": 0.003041599993593991,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 1.0,
-        "tokens": 26,
-        "seconds": 0.003209599992260337,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": null,
-        "mrr": 0.5,
-        "tokens": 15,
-        "seconds": 0.00310550001449883,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 15,
-        "seconds": 0.0028720000409521163,
+        "seconds": 0.0031512000132352114,
         "n_hits": 5
       },
       {
@@ -1073,7 +975,37 @@
         "indirect_recall": null,
         "mrr": 0.2,
         "tokens": 31,
-        "seconds": 0.0031375999678857625,
+        "seconds": 0.0030089999781921506,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 41,
+        "seconds": 0.0031410999945364892,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 27,
+        "seconds": 0.0031564999953843653,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 0.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.3333333333333333,
+        "tokens": 23,
+        "seconds": 0.0029664000030606985,
         "n_hits": 5
       },
       {
@@ -1083,87 +1015,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 21,
-        "seconds": 0.0028929999680258334,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 0.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 27,
-        "seconds": 0.003397999971639365,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.4,
-        "indirect_recall": 0.3333333333333333,
-        "mrr": 0.25,
-        "tokens": 15,
-        "seconds": 0.00331579998601228,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.2,
-        "indirect_recall": 0.0,
-        "mrr": 0.5,
-        "tokens": 15,
-        "seconds": 0.003192199976183474,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": 0.0,
-        "mrr": 0.0,
-        "tokens": 18,
-        "seconds": 0.003195199999026954,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 1.0,
-        "file_recall": 1.0,
-        "precision": 0.4,
-        "indirect_recall": 0.3333333333333333,
-        "mrr": 0.5,
-        "tokens": 15,
-        "seconds": 0.003185699984896928,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 41,
-        "seconds": 0.0032771999831311405,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 41,
-        "seconds": 0.00327000004472211,
-        "n_hits": 5
-      },
-      {
-        "unit_recall": 0.0,
-        "file_recall": 1.0,
-        "precision": 0.0,
-        "indirect_recall": null,
-        "mrr": 0.0,
-        "tokens": 36,
-        "seconds": 0.0035396000021137297,
+        "seconds": 0.003009699983522296,
         "n_hits": 5
       },
       {
@@ -1171,9 +1023,29 @@
         "file_recall": 1.0,
         "precision": 0.2,
         "indirect_recall": null,
-        "mrr": 0.3333333333333333,
-        "tokens": 26,
-        "seconds": 0.003371099999640137,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.0035388999967835844,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 17,
+        "seconds": 0.0026026000268757343,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 22,
+        "seconds": 0.0027021000278182328,
         "n_hits": 5
       },
       {
@@ -1183,7 +1055,97 @@
         "indirect_recall": null,
         "mrr": 1.0,
         "tokens": 26,
-        "seconds": 0.0036158000002615154,
+        "seconds": 0.003031600033864379,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.003306700033135712,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.3333333333333333,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.003225899999961257,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": 0.0,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.002885500027332455,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.3333333333333333,
+        "mrr": 0.25,
+        "tokens": 15,
+        "seconds": 0.0027392999618314207,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 18,
+        "seconds": 0.0031832000240683556,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 41,
+        "seconds": 0.0035391999990679324,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 36,
+        "seconds": 0.0035460999934002757,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.3333333333333333,
+        "tokens": 26,
+        "seconds": 0.0031712999916635454,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 26,
+        "seconds": 0.0033087999909184873,
         "n_hits": 5
       },
       {
@@ -1193,7 +1155,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 27,
-        "seconds": 0.003881899989210069,
+        "seconds": 0.0033766000415198505,
         "n_hits": 5
       },
       {
@@ -1203,7 +1165,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 35,
-        "seconds": 0.0033013999927788973,
+        "seconds": 0.0029971000039950013,
         "n_hits": 5
       },
       {
@@ -1213,7 +1175,7 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 34,
-        "seconds": 0.004187099984847009,
+        "seconds": 0.0028452000115066767,
         "n_hits": 5
       },
       {
@@ -1223,11 +1185,11 @@
         "indirect_recall": null,
         "mrr": 0.0,
         "tokens": 35,
-        "seconds": 0.004116100026294589,
+        "seconds": 0.0036279999767430127,
         "n_hits": 5
       }
     ]
   },
-  "rev": "feat/multi-hop@b11e900",
+  "rev": "feat/multi-hop@134b53a",
   "root": "J:\\Playgroung\\URAG\\benchmarks\\fixtures\\callgraph_fixture"
 }

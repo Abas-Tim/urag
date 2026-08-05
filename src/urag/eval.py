@@ -240,15 +240,22 @@ def resolve_question(db: Database, q: Question) -> Question:
     return q
 
 
+def _seeded_shuffle(items: list, seed: int = 42) -> list:
+    import random
+
+    items = list(items)
+    random.Random(seed).shuffle(items)
+    return items
+
+
 def autogen_questions(db: Database, n: int) -> list[Question]:
     """Auto-generate provable-gold questions: definitions + calls."""
     qs: list[Question] = []
     # definition questions: pick n units with meaningful signatures
     rows = db.conn.execute(
-        "SELECT id, qualname FROM units WHERE unit_type IN ('function','method','class','struct','interface','enum') AND qualname != '' ORDER BY RANDOM() LIMIT ?",
-        (n,),
+        "SELECT id, qualname FROM units WHERE unit_type IN ('function','method','class','struct','interface','enum') AND qualname != '' ORDER BY id",
     ).fetchall()
-    for r in rows:
+    for r in _seeded_shuffle(rows)[:n]:
         qs.append(
             Question(
                 query=f"where is {r['qualname']} defined",
@@ -261,11 +268,10 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
     calls = db.conn.execute(
         """
         SELECT e.callee, GROUP_CONCAT(DISTINCT e.caller_unit_id) AS callers
-        FROM call_edges e GROUP BY e.callee ORDER BY RANDOM() LIMIT ?
+        FROM call_edges e GROUP BY e.callee ORDER BY e.callee
         """,
-        (n,),
     ).fetchall()
-    for r in calls:
+    for r in _seeded_shuffle(calls)[:n]:
         ids = [int(x) for x in r["callers"].split(",")]
         qs.append(
             Question(
@@ -329,9 +335,9 @@ def transitive_caller_ids(db: Database, name: str, max_depth: int = 3) -> dict[i
 
 def autogen_transitive_questions(db: Database, n: int, max_depth: int = 3) -> list[Question]:
     """Questions whose gold = ALL transitive callers (hops 1..max_depth)."""
-    rows = db.conn.execute("SELECT DISTINCT callee FROM call_edges ORDER BY RANDOM()").fetchall()
+    rows = db.conn.execute("SELECT DISTINCT callee FROM call_edges ORDER BY callee").fetchall()
     qs: list[Question] = []
-    for r in rows:
+    for r in _seeded_shuffle(rows):
         callee = r["callee"]
         seen = transitive_caller_ids(db, callee, max_depth=max_depth)
         if not any(h >= 2 for h in seen.values()):

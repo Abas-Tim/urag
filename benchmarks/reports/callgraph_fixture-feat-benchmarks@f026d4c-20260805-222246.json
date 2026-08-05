@@ -1,0 +1,1233 @@
+{
+  "top_k": 5,
+  "questions": [
+    {
+      "query": "where is other_entry defined",
+      "label": "definition",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        14
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is ping defined",
+      "label": "definition",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        27
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is stage2 defined",
+      "label": "definition",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        11
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is entry defined",
+      "label": "definition",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        9
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is stage3 defined",
+      "label": "definition",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        12
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is connect defined",
+      "label": "definition",
+      "gold_file": "sdk/net.ts",
+      "gold_unit_ids": [
+        32
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is Boot.Main defined",
+      "label": "definition",
+      "gold_file": "mvc/Program.cs",
+      "gold_unit_ids": [
+        23
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is is_dir defined",
+      "label": "definition",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        18
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is Client.open defined",
+      "label": "definition",
+      "gold_file": "sdk/core.ts",
+      "gold_unit_ids": [
+        30
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is run defined",
+      "label": "definition",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        26
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls validate",
+      "label": "call",
+      "gold_file": "app/auth.py",
+      "gold_unit_ids": [
+        5,
+        7
+      ],
+      "target": "validate",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls exists",
+      "label": "call",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        17
+      ],
+      "target": "exists",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls makeClient",
+      "label": "call",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        26
+      ],
+      "target": "makeClient",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls stop",
+      "label": "call",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        12
+      ],
+      "target": "stop",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls connect",
+      "label": "call",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        27
+      ],
+      "target": "connect",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls isdir",
+      "label": "call",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        18
+      ],
+      "target": "isdir",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls stage1",
+      "label": "call",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        9
+      ],
+      "target": "stage1",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls stage3",
+      "label": "call",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        11
+      ],
+      "target": "stage3",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls Start",
+      "label": "call",
+      "gold_file": "goapp/main.go",
+      "gold_unit_ids": [
+        20
+      ],
+      "target": "Start",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls Info",
+      "label": "call",
+      "gold_file": "mvc/Program.cs",
+      "gold_unit_ids": [
+        23
+      ],
+      "target": "Info",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who transitively calls stage2",
+      "label": "transitive",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        10,
+        14,
+        9
+      ],
+      "target": "stage2",
+      "depth": 3,
+      "gold_hops": {
+        "10": 1,
+        "14": 1,
+        "9": 2
+      }
+    },
+    {
+      "query": "who transitively calls stop",
+      "label": "transitive",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        12,
+        11,
+        10,
+        14
+      ],
+      "target": "stop",
+      "depth": 3,
+      "gold_hops": {
+        "12": 1,
+        "11": 2,
+        "10": 3,
+        "14": 3
+      }
+    },
+    {
+      "query": "who transitively calls stage3",
+      "label": "transitive",
+      "gold_file": "core/chain.py",
+      "gold_unit_ids": [
+        11,
+        10,
+        14,
+        9
+      ],
+      "target": "stage3",
+      "depth": 3,
+      "gold_hops": {
+        "11": 1,
+        "10": 2,
+        "14": 2,
+        "9": 3
+      }
+    },
+    {
+      "query": "who transitively calls open",
+      "label": "transitive",
+      "gold_file": "sdk/core.ts",
+      "gold_unit_ids": [
+        29,
+        27
+      ],
+      "target": "open",
+      "depth": 3,
+      "gold_hops": {
+        "29": 1,
+        "27": 2
+      }
+    },
+    {
+      "query": "who calls core.http.fetch",
+      "label": "alias",
+      "gold_file": "app/api.py",
+      "gold_unit_ids": [
+        2
+      ],
+      "target": "core.http.fetch",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls core.http.fetch",
+      "label": "alias",
+      "gold_file": "app/api.py",
+      "gold_unit_ids": [
+        3
+      ],
+      "target": "core.http.fetch",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls core.auth.validate",
+      "label": "alias",
+      "gold_file": "app/auth.py",
+      "gold_unit_ids": [
+        5
+      ],
+      "target": "core.auth.validate",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls os.path.exists",
+      "label": "alias",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        17
+      ],
+      "target": "os.path.exists",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls os.path.isdir",
+      "label": "alias",
+      "gold_file": "core/utils.py",
+      "gold_unit_ids": [
+        18
+      ],
+      "target": "os.path.isdir",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls myproj.helpers.Start",
+      "label": "alias",
+      "gold_file": "goapp/main.go",
+      "gold_unit_ids": [
+        20
+      ],
+      "target": "myproj.helpers.Start",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls Common.Logging.Info",
+      "label": "alias",
+      "gold_file": "mvc/Program.cs",
+      "gold_unit_ids": [
+        23
+      ],
+      "target": "Common.Logging.Info",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls sdk.core.makeClient",
+      "label": "alias",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        26
+      ],
+      "target": "sdk.core.makeClient",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls sdk.net.connect",
+      "label": "alias",
+      "gold_file": "sdk/app.ts",
+      "gold_unit_ids": [
+        27
+      ],
+      "target": "sdk.net.connect",
+      "depth": 1,
+      "gold_hops": {}
+    }
+  ],
+  "systems": {
+    "urag-callers": {
+      "n": 23,
+      "unit_recall": 0.6086956521739131,
+      "file_recall": 0.6086956521739131,
+      "precision": 0.6086956521739131,
+      "indirect_recall": 0.0,
+      "mrr": 0.6086956521739131,
+      "mean_tokens": 2.608695652173913,
+      "mean_sec": 0.0001255304415953224,
+      "p50_sec": 0.000118900032248348,
+      "p95_sec": 0.00019910000264644623
+    },
+    "urag-transitive": {
+      "n": 23,
+      "unit_recall": 0.6086956521739131,
+      "file_recall": 0.6086956521739131,
+      "precision": 0.6086956521739131,
+      "indirect_recall": 0.0,
+      "mrr": 0.6086956521739131,
+      "mean_tokens": 2.608695652173913,
+      "mean_sec": 7.9413043314834e-05,
+      "p50_sec": 8.120003622025251e-05,
+      "p95_sec": 0.00011219998123124242
+    },
+    "urag-hybrid": {
+      "n": 33,
+      "unit_recall": 0.6363636363636364,
+      "file_recall": 0.8787878787878788,
+      "precision": 0.1393939393939394,
+      "indirect_recall": 0.16666666666666666,
+      "mrr": 0.46414141414141413,
+      "mean_tokens": 25.03030303030303,
+      "mean_sec": 0.004922206063797189,
+      "p50_sec": 0.0035974999773316085,
+      "p95_sec": 0.0064211999997496605
+    }
+  },
+  "per_query": {
+    "urag-callers": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.0002201999886892736,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.00012089998926967382,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 0.00017559999832883477,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00012480001896619797,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.0001018000184558332,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.00012450001668184996,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00019910000264644623,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00013540004147216678,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00012370001059025526,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00010790000669658184,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00014100002590566874,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.000118900032248348,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00017200002912431955,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.00011979998089373112,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 9.119999594986439e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 9.99000039882958e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 0.00010379997547715902,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 0.00010870001278817654,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 9.889999637380242e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 0.00010569998994469643,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 0.00011169997742399573,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 9.440002031624317e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 8.730002446100116e-05,
+        "n_hits": 0
+      }
+    ],
+    "urag-transitive": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00010280002607032657,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 8.139997953549027e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 0.00010580004891380668,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 8.269998943433166e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 6.589997792616487e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 8.269998943433166e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00011219998123124242,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 9.14999982342124e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 8.299999171867967e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 6.130000110715628e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 7,
+        "seconds": 0.00010010000551119447,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 8.079997496679425e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00011319998884573579,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 8.120003622025251e-05,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 6.400002166628838e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 6.210000719875097e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 8.720002369955182e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 7.010000990703702e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 6.140000186860561e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 6.19000056758523e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 5.8399979025125504e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 5.959998816251755e-05,
+        "n_hits": 0
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 0,
+        "seconds": 5.719996988773346e-05,
+        "n_hits": 0
+      }
+    ],
+    "urag-hybrid": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 23,
+        "seconds": 0.038673800008837134,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 37,
+        "seconds": 0.005024499958381057,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 15,
+        "seconds": 0.004397899960167706,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 22,
+        "seconds": 0.00512929999968037,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 15,
+        "seconds": 0.0064211999997496605,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 32,
+        "seconds": 0.004233699990436435,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 26,
+        "seconds": 0.004444899968802929,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 21,
+        "seconds": 0.00426560000050813,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 28,
+        "seconds": 0.003915800014510751,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 21,
+        "seconds": 0.004514199972618371,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 0.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.3333333333333333,
+        "tokens": 23,
+        "seconds": 0.003630499995779246,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 21,
+        "seconds": 0.003370499995071441,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 27,
+        "seconds": 0.0033210000256076455,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.2,
+        "tokens": 21,
+        "seconds": 0.0035040000220760703,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.2,
+        "tokens": 31,
+        "seconds": 0.0029764000209979713,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 26,
+        "seconds": 0.003265900013502687,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 15,
+        "seconds": 0.0030847000307403505,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.003759100043680519,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 17,
+        "seconds": 0.0032621999853290617,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 26,
+        "seconds": 0.0026564999716356397,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": 0.0,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.003109699988272041,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.3333333333333333,
+        "mrr": 0.25,
+        "tokens": 15,
+        "seconds": 0.0031456000288017094,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.3333333333333333,
+        "mrr": 0.5,
+        "tokens": 15,
+        "seconds": 0.004552900034468621,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 18,
+        "seconds": 0.003528399975039065,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 41,
+        "seconds": 0.0035974999773316085,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 41,
+        "seconds": 0.0032674000249244273,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 36,
+        "seconds": 0.005445500020869076,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.3333333333333333,
+        "tokens": 26,
+        "seconds": 0.0033807000145316124,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 26,
+        "seconds": 0.003748200018890202,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 27,
+        "seconds": 0.004714900045655668,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 35,
+        "seconds": 0.003160500025842339,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 34,
+        "seconds": 0.003485299996100366,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 35,
+        "seconds": 0.003444499976467341,
+        "n_hits": 5
+      }
+    ]
+  },
+  "rev": "feat/benchmarks@f026d4c",
+  "root": "J:\\Playgroung\\URAG\\benchmarks\\fixtures\\callgraph_fixture"
+}

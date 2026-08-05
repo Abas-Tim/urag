@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import statistics
 import subprocess
 import time
@@ -37,6 +38,9 @@ class Question:
     gold_unit_ids: list[int] = field(default_factory=list)
     gold_file: str = ""
     label: str = "symbol"
+    target: str = ""
+    depth: int = 1
+    gold_hops: dict[int, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -44,6 +48,9 @@ class Question:
             "label": self.label,
             "gold_file": self.gold_file,
             "gold_unit_ids": self.gold_unit_ids,
+            "target": self.target,
+            "depth": self.depth,
+            "gold_hops": {str(k): v for k, v in self.gold_hops.items()},
         }
 
 
@@ -260,7 +267,201 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
     ).fetchall()
     for r in calls:
         ids = [int(x) for x in r["callers"].split(",")]
-        qs.append(Question(query=f"what calls {r['callee']}", gold_unit_ids=ids, label="call"))
+        qs.append(
+            Question(
+                query=f"what calls {r['callee']}",
+                gold_unit_ids=ids,
+                label="call",
+                target=r["callee"],
+            )
+        )
+    return qs
+
+
+# ---------------------------------------------------------------------------
+# Call-graph benchmark questions (transitive + alias), provable gold
+# ---------------------------------------------------------------------------
+
+
+def _raw_callers(db: Database, names: list[str]) -> list[dict]:
+    """Exact-match callers of any of `names` (by last segment or full chain)."""
+    names = [n for n in names if n]
+    if not names:
+        return []
+    marks = ",".join("?" * len(names))
+    rows = db.conn.execute(
+        f"""
+        SELECT DISTINCT e.caller_unit_id, e.callee_full, e.line, f.path
+        FROM call_edges e JOIN files f ON f.id = e.file_id
+        WHERE e.callee IN ({marks}) OR e.callee_full IN ({marks})
+        """,
+        names + names,
+    ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        got = db.unit_by_id(r["caller_unit_id"])
+        if got:
+            out.append({"unit": got[0], "path": r["path"], "callee_full": r["callee_full"], "line": r["line"]})
+    return out
+
+
+def transitive_caller_ids(db: Database, name: str, max_depth: int = 3) -> dict[int, int]:
+    """BFS over call_edges: unit_id -> shortest hop (1 = direct caller)."""
+    seen: dict[int, int] = {}
+    frontier: list[str] = [name]
+    for hop in range(1, max_depth + 1):
+        nxt: list[str] = []
+        for callee in frontier:
+            for row in _raw_callers(db, [callee]):
+                uid = row["unit"].id
+                if uid in seen:
+                    continue
+                seen[uid] = hop
+                u = row["unit"]
+                nxt.append(u.name)
+                if u.qualname and u.qualname != u.name:
+                    nxt.append(u.qualname)
+        frontier = nxt
+        if not frontier:
+            break
+    return seen
+
+
+def autogen_transitive_questions(db: Database, n: int, max_depth: int = 3) -> list[Question]:
+    """Questions whose gold = ALL transitive callers (hops 1..max_depth)."""
+    rows = db.conn.execute("SELECT DISTINCT callee FROM call_edges ORDER BY RANDOM()").fetchall()
+    qs: list[Question] = []
+    for r in rows:
+        callee = r["callee"]
+        seen = transitive_caller_ids(db, callee, max_depth=max_depth)
+        if not any(h >= 2 for h in seen.values()):
+            continue
+        qs.append(
+            Question(
+                query=f"who transitively calls {callee}",
+                gold_unit_ids=list(seen.keys()),
+                label="transitive",
+                target=callee,
+                depth=max_depth,
+                gold_hops=seen,
+            )
+        )
+        if len(qs) >= n:
+            break
+    return qs
+
+
+def scan_import_aliases(source: str, language: str) -> dict[str, str]:
+    """alias -> fully-qualified target, from source text (harness-independent)."""
+    aliases: dict[str, str] = {}
+    if language == "python":
+        for line in source.splitlines():
+            s = line.strip()
+            m = re.match(r"^import\s+([\w.]+)\s+as\s+(\w+)$", s)
+            if m:
+                aliases[m.group(2)] = m.group(1)
+                continue
+            m = re.match(r"^from\s+([\w.]+)\s+import\s+(.+)$", s)
+            if m:
+                for part in m.group(2).split(","):
+                    pm = re.match(r"\s*([\w.]+)\s+as\s+(\w+)\s*$", part)
+                    if pm:
+                        aliases[pm.group(2)] = f"{m.group(1)}.{pm.group(1)}"
+    elif language == "typescript":
+        for line in source.splitlines():
+            s = line.strip()
+            m = re.match(r"^import\s+\*\s+as\s+(\w+)\s+from\s+['\"]([^'\"]+)['\"]", s)
+            if m:
+                aliases[m.group(1)] = m.group(2).strip("@").replace("/", ".")
+                continue
+            m = re.match(r"^import\s+(\w+)\s+from\s+['\"]([^'\"]+)['\"]", s)
+            if m:
+                aliases[m.group(1)] = f"{m.group(2).strip('@').replace('/', '.')}.default"
+                continue
+            m = re.match(r"^import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]", s)
+            if m:
+                mod = m.group(2).strip("@").replace("/", ".")
+                for part in m.group(1).split(","):
+                    pm = re.match(r"\s*(\w+)\s+as\s+(\w+)\s*$", part)
+                    if pm:
+                        aliases[pm.group(2)] = f"{mod}.{pm.group(1)}"
+    elif language == "go":
+        for line in source.splitlines():
+            m = re.match(r'^\s*import\s+(\w+)\s+"([^"]+)"\s*$', line)
+            if m:
+                aliases[m.group(1)] = m.group(2).replace("/", ".")
+    elif language == "csharp":
+        for line in source.splitlines():
+            m = re.match(r"^\s*using\s+(\w+)\s*=\s*([\w.]+)\s*;", line)
+            if m:
+                aliases[m.group(1)] = m.group(2)
+    return aliases
+
+
+def _unit_at_byte(db: Database, file_id: int, byte_start: int) -> int | None:
+    """Smallest unit containing byte_start (import units excluded)."""
+    row = db.conn.execute(
+        """
+        SELECT u.id FROM units u
+        WHERE u.file_id = ? AND u.byte_start <= ? AND u.byte_end >= ? AND u.unit_type != 'import'
+        ORDER BY (u.byte_end - u.byte_start) LIMIT 1
+        """,
+        (file_id, byte_start, byte_start),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
+    """Aliased call sites, gold = the unit containing each call; query uses the
+    fully-qualified target chain (e.g. `import os.path as op` + `op.exists()` ->
+    "who calls os.path.exists")."""
+    from .extractors import get_extractor
+
+    files = db.conn.execute("SELECT id, path, language FROM files").fetchall()
+    qs: list[Question] = []
+    for f in files:
+        if not f["language"] or f["language"] == "markdown":
+            continue
+        p = root / f["path"]
+        if not p.exists():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        aliases = scan_import_aliases(text, f["language"])
+        if not aliases:
+            continue
+        ext = get_extractor(f["language"])
+        if ext is None:
+            continue
+        seen: set[tuple[str, int]] = set()
+        for c in ext.collect_calls(text):
+            for alias, target in aliases.items():
+                prefix = alias + "."
+                if c.callee_full == alias:
+                    real = target
+                elif c.callee_full.startswith(prefix):
+                    real = f"{target}.{c.callee_full[len(prefix):]}"
+                else:
+                    continue
+                owner = _unit_at_byte(db, f["id"], c.byte_start)
+                if owner is None:
+                    continue
+                if (real, owner) in seen:
+                    continue
+                seen.add((real, owner))
+                qs.append(
+                    Question(
+                        query=f"who calls {real}",
+                        gold_unit_ids=[owner],
+                        gold_file=f["path"],
+                        label="alias",
+                        target=real,
+                    )
+                )
+                if len(qs) >= n:
+                    return qs
     return qs
 
 
@@ -297,6 +498,16 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     unit_recall = 1.0 if (gold_ids and hit_unit_ids & gold_ids) else 0.0
     file_recall = 1.0 if (gold_file and gold_file in hit_files) else 0.0
 
+    relevant = hit_unit_ids & gold_ids if gold_ids else set()
+    precision = len(relevant) / len(hits) if hits else 0.0
+
+    indirect_recall: float | None = None
+    if q.gold_hops:
+        found = {uid for uid in hit_unit_ids if uid in q.gold_hops}
+        indirect = {uid for uid, hop in q.gold_hops.items() if hop >= 2}
+        if indirect:
+            indirect_recall = len(found & indirect) / len(indirect)
+
     mrr = 0.0
     if gold_ids:
         for i, h in enumerate(hits[:top_k]):
@@ -311,6 +522,8 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     return {
         "unit_recall": unit_recall,
         "file_recall": file_recall,
+        "precision": precision,
+        "indirect_recall": indirect_recall,
         "mrr": mrr,
         "tokens": run.tokens,
         "seconds": run.seconds,
@@ -323,10 +536,17 @@ def aggregate(rows: list[dict]) -> dict:
         return {}
     lat = sorted(r["seconds"] for r in rows)
     n = len(lat)
+
+    def _mean(key: str) -> float:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return sum(vals) / len(vals) if vals else 0.0
+
     return {
         "n": n,
         "unit_recall": sum(r["unit_recall"] for r in rows) / n,
         "file_recall": sum(r["file_recall"] for r in rows) / n,
+        "precision": _mean("precision"),
+        "indirect_recall": _mean("indirect_recall"),
         "mrr": sum(r["mrr"] for r in rows) / n,
         "mean_tokens": sum(r["tokens"] for r in rows) / n,
         "mean_sec": sum(lat) / n,

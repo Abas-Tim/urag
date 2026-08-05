@@ -197,6 +197,8 @@ def eval_cmd(
     root: Path = typer.Option(".", help="project root"),
     questions: Optional[Path] = typer.Option(None, "--questions", help="JSONL of {query, gold_file?, gold_unit_ids?}"),
     autogen: Optional[int] = typer.Option(None, "--autogen", help="auto-generate N definition + N call questions with provable gold"),
+    transitive: Optional[int] = typer.Option(None, "--transitive", help="add N multi-hop (callers-of-callers) questions with provable gold"),
+    alias: Optional[int] = typer.Option(None, "--alias", help="add N import-alias resolution questions with provable gold"),
     top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
     systems: Optional[str] = typer.Option(None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"),
     judge_url: Optional[str] = typer.Option(None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"),
@@ -213,7 +215,9 @@ def eval_cmd(
         RgBaseline,
         SystemRun,
         aggregate,
+        autogen_alias_questions,
         autogen_questions,
+        autogen_transitive_questions,
         judge_results,
         load_questions,
         resolve_question,
@@ -230,6 +234,10 @@ def eval_cmd(
             qs = autogen_questions(db, autogen)
         else:
             qs = autogen_questions(db, 10)
+        if transitive:
+            qs += autogen_transitive_questions(db, transitive)
+        if alias:
+            qs += autogen_alias_questions(db, cfg.project_root, alias)
         qs = [resolve_question(db, q) for q in qs]
 
         chosen = (systems or "urag-hybrid,urag-lexical,rg,chunk").split(",")
@@ -266,6 +274,23 @@ def eval_cmd(
                 runs["rg"] = rg.search(q.query, top_k, db)
             if "chunk" in chosen:
                 runs["chunk"] = chunk.search(q.query, top_k, db)
+            if q.target and ("urag-callers" in chosen or "urag-transitive" in chosen):
+                if "urag-callers" in chosen:
+                    t = time.perf_counter()
+                    r = retriever.search_callers(q.target, limit=top_k)
+                    run = urag_run(r)
+                    run.seconds = time.perf_counter() - t
+                    runs["urag-callers"] = run
+                if "urag-transitive" in chosen:
+                    t = time.perf_counter()
+                    st = getattr(retriever, "search_transitive", None)
+                    if st is None:
+                        r = retriever.search_callers(q.target, limit=top_k)
+                    else:
+                        r = st(q.target, depth=q.depth or 3, limit=top_k)
+                    run = urag_run(r)
+                    run.seconds = time.perf_counter() - t
+                    runs["urag-transitive"] = run
             if "oracle" in chosen:
                 runs["oracle"] = oracle.search(q, db)
             for name, run in runs.items():

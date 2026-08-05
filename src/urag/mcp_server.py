@@ -67,6 +67,9 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
         "commit": r.commit,
         "stale": r.stale,
     }
+    if r.caller_of:
+        packet["calls"] = r.caller_of
+        packet["call_line"] = r.call_line
     if include_evidence and u.id is not None:
         ev = db.load_evidence(u.id)
         if ev and "span" in ev:

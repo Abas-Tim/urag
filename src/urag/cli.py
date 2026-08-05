@@ -85,14 +85,15 @@ def init(
     if not cfg.urag_dir.exists():
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
     gi = root / ".gitignore"
+    entry = f"{UURAG_DIR}/"
     if gi.exists():
         content = gi.read_text(encoding="utf-8", errors="replace")
-        if UURAG_DIR not in content.splitlines():
-            gi.write_text(content.rstrip() + f"\n{UURAG_DIR}/\n", encoding="utf-8")
-            console.print(f"[green]added .urag/ to {gi}[/green]")
+        if entry not in content.splitlines():
+            gi.write_text(content.rstrip() + f"\n{entry}\n", encoding="utf-8")
+            console.print(f"[green]added {entry} to {gi}[/green]")
     else:
-        gi.write_text(f"{UURAG_DIR}/\n", encoding="utf-8")
-        console.print(f"[green]created {gi} with .urag/ entry[/green]")
+        gi.write_text(f"{entry}\n", encoding="utf-8")
+        console.print(f"[green]created {gi} with {entry} entry[/green]")
     db = Database(cfg.db_path, cfg.embedding.dimension)
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")

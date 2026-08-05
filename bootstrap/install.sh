@@ -12,7 +12,7 @@
 #   URAG_BIN      install directory (default: uv tool bin dir, i.e. ~/.local/bin)
 set -e
 
-URAG_PACKAGE="${URAG_PACKAGE:-urag}"
+URAG_PACKAGE="${URAG_PACKAGE:-urag-cli}"
 
 say() { printf '%s\n' "$*"; }
 

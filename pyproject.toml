@@ -1,5 +1,5 @@
 [project]
-name = "urag"
+name = "urag-cli"
 version = "0.1.0"
 description = "Universal Repository Agent Graph: structure-aware, token-efficient RAG for projects"
 readme = "README.md"

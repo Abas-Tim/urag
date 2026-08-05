@@ -9,7 +9,7 @@
 #   URAG_PACKAGE  package spec to install (default: urag -> PyPI)
 #                 e.g. "urag==0.1.0" or a git URL / wheel path
 $ErrorActionPreference = "Stop"
-$Package = if ($env:URAG_PACKAGE) { $env:URAG_PACKAGE } else { "urag" }
+$Package = if ($env:URAG_PACKAGE) { $env:URAG_PACKAGE } else { "urag-cli" }
 
 function Ensure-Uv {
     if (Get-Command uv -ErrorAction SilentlyContinue) { return }

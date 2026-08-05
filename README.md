@@ -36,9 +36,9 @@ irm https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.ps1 |
 **From PyPI (once published) — the standard install:**
 
 ```bash
-uv tool install urag        # global `urag` on PATH (uv)
-pipx install urag           # same, via pipx
-# or in a project venv:     uv add urag
+uv tool install urag-cli       # global `urag` on PATH (uv)
+pipx install urag-cli          # same, via pipx
+# or in a project venv:     uv add urag-cli
 
 urag --version
 ```
@@ -47,7 +47,7 @@ urag --version
 first use, no setup on new machines:
 
 ```json
-{ "mcpServers": { "urag": { "command": ["uvx", "urag", "mcp", "--root", "/path/to/project"] } } }
+{ "mcpServers": { "urag": { "command": ["uvx", "--from", "urag-cli", "urag", "mcp", "--root", "/path/to/project"] } } }
 ```
 
 `uvx` supports any install source, so until urag is on PyPI you can point

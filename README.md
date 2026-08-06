@@ -1,275 +1,283 @@
-# urag — Universal Repository Agent Graph
+# urag
 
-Structure-aware, token-efficient RAG for software projects. Indexes symbols,
-signatures, relationships and docs into a single portable SQLite database,
-then answers queries with small, cited evidence packets instead of whole files.
+**Universal Repository Agent Graph**
 
-**Key design (per 2026 RAG research):**
-- **Retrieval keys ≠ evidence payloads** — compact L0/L1 records (name, signature,
-  summary, concepts) are embedded and lexically indexed; exact source spans (L2)
-  are loaded lazily on demand.
-- **Hybrid retrieval** — FTS5 lexical (finds names/identifiers) + sqlite-vec dense
-  (finds concepts), fused with Reciprocal Rank Fusion.
-- **Structure-aware units** — tree-sitter extracts functions, methods, classes,
-  interfaces, imports with line/byte spans, docstrings and relationships.
-- **Incremental + continuous** — mtime-based re-indexing; `watch` daemon keeps
-  the index fresh automatically.
-- **Model-agnostic embeddings** — local ONNX (offline, no API key) by default,
-  or any OpenAI-compatible `/embeddings` endpoint.
+Structure-aware retrieval and impact analysis for software repositories. urag
+indexes code symbols, documentation, call sites, and source locations into a
+portable SQLite database. It then returns small, cited result packets that are
+useful to developers and AI agents without loading whole files into context.
 
-## Install
+urag is a retrieval layer, not an LLM. It finds the relevant repository
+context; the developer or agent uses that context to answer the question.
 
-urag is a Python CLI that installs anywhere uv or Python runs (Windows,
-macOS, Linux). Requires only the `urag` command plus `git` (for git-aware
-provenance); the embedding model (~25 MB) downloads on first use.
+See [urag in action](docs/urag-in-action.md) for a complete indexing and agent
+response walkthrough.
 
-**One-liner from the internet (needs uv; auto-installs uv if missing):**
+## Why urag
 
-```bash
-# macOS / Linux
-curl -LsSf https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.sh | sh
+Traditional text search is good at finding strings. Generic RAG is good at
+finding similar text. Repository questions often need both, plus structural
+information such as:
 
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/Abas-Tim/urag/main/bootstrap/install.ps1 | iex
+- Where is a function, class, interface, or type defined?
+- How does a feature work across modules?
+- What calls this function?
+- What is the downstream impact of changing a symbol?
+- Which exact source lines support the result?
+
+urag addresses these questions with:
+
+- Tree-sitter parsing for symbol-aware indexing.
+- FTS5 lexical search for exact names and identifiers.
+- sqlite-vec embeddings for conceptual search.
+- Reciprocal Rank Fusion for the default hybrid search.
+- A static call graph for direct and multi-hop caller queries.
+- Import-alias resolution for selected languages.
+- Lazy source retrieval, so search results stay compact.
+- Incremental indexing and a file watcher for active repositories.
+- A CLI and a stdio MCP server for agent harnesses.
+
+## How It Works
+
+```text
+repository files
+       |
+       v
+file discovery and incremental checks
+       |
+       v
+tree-sitter extractors
+       |
+       +--> symbols, signatures, summaries, spans
+       +--> call edges and import aliases
+       |
+       v
+SQLite project index
+       |
+       +--> FTS5 lexical index
+       +--> sqlite-vec dense index
+       +--> files, units, calls, and aliases
+       |
+       v
+ranked result packets
+       |
+       v
+exact source span fetched only when needed
 ```
 
-**From PyPI (once published) — the standard install:**
+Each indexed unit has three practical layers:
+
+| Layer | Contents | Purpose |
+| --- | --- | --- |
+| Retrieval key | Name, qualified name, signature, summary, concepts | Search and embedding input |
+| Relationships | File, line, byte span, parent, calls, aliases | Navigation and impact analysis |
+| Evidence | Exact source lines on disk | Final context, loaded on demand |
+
+The index is stored per project in `.urag/index.db`. SQLite uses WAL mode, and
+new embeddings are written in batches of 64 units.
+
+## Installation
+
+Requirements:
+
+- Python 3.12 or newer.
+- `git` is optional, but is used for commit provenance and changed-file
+  detection when available.
+- The default local embedding model downloads on first use and is cached
+  locally. No API key is required for the default provider.
+
+### From Source
 
 ```bash
-uv tool install urag-cli       # global `urag` on PATH (uv)
-pipx install urag-cli          # same, via pipx
-# or in a project venv:     uv add urag-cli
+git clone https://github.com/Abas-Tim/urag.git
+cd urag
+uv sync
+uv run urag --version
+```
 
+To install the command globally with uv:
+
+```bash
+uv tool install .
 urag --version
 ```
 
-**Zero-install for agent harnesses (MCP)** — `uvx` downloads and caches on
-first use, no setup on new machines:
+The repository also contains bootstrap installers for macOS, Linux, and
+Windows under `bootstrap/`.
 
-```json
-{ "mcpServers": { "urag": { "command": ["uvx", "--from", "urag-cli", "urag", "mcp", "--root", "/path/to/project"] } } }
-```
+## Quick Start
 
-`uvx` supports any install source, so until urag is on PyPI you can point
-it at the repo or a wheel: `uvx --from git+https://github.com/Abas-Tim/urag urag mcp --root .`
-
-**From source (developers):**
+Run these commands from a repository you want to index:
 
 ```bash
-git clone https://github.com/Abas-Tim/urag
-cd urag && uv sync && uv run urag --help
+urag init --root /path/to/project --full
+urag search "how does authentication work" --root /path/to/project
+urag search "TokenValidator.validate" --mode lexical --top-k 3 --root /path/to/project
+urag callers index_all --depth 3 --root /path/to/project
+urag get UNIT_ID --root /path/to/project
 ```
 
-## Usage
+`urag init` creates `.urag/`, the project configuration, and the database.
+Use `--full` for the initial index. Later updates are incremental:
 
 ```bash
-urag init               # set up .urag/ config + .gitignore, initial index
-urag watch              # continuously re-index on file changes (Ctrl+C to stop)
-urag search "how does auth work"        # hybrid search
-urag search "TokenValidator" --mode lexical --top-k 5
-urag search "RRF" --mode lexical --json --evidence
-urag get 190            # fetch exact source span for a unit
-urag status             # index stats
-urag doctor             # health check
+urag index --root /path/to/project
+urag watch --root /path/to/project
 ```
 
-Project config lives in `.urag/urag.toml` (auto-created):
+`watch` debounces filesystem events and re-indexes changed files. It can also
+run a periodic full rescan with `--rescan 30`.
+
+## CLI
+
+| Command | Description |
+| --- | --- |
+| `urag init` | Create project configuration and an empty index; add `.urag/` to `.gitignore` |
+| `urag init --full` | Create the project index and index all eligible files |
+| `urag index` | Incrementally index new, changed, and deleted files |
+| `urag watch` | Keep the index updated while files change |
+| `urag search QUERY` | Search symbols and documentation |
+| `urag callers NAME` | Find direct callers of a symbol |
+| `urag callers NAME --depth 3` | Find callers through multiple call-graph hops |
+| `urag get UNIT_ID` | Fetch the exact source span for a search result |
+| `urag status` | Show file, unit, embedding, language, and database statistics |
+| `urag doctor` | Check index and embedding health |
+| `urag classify QUERY` | Show the query class and selected context budget |
+| `urag eval` | Compare retrieval systems on a question set |
+| `urag mcp` | Run the MCP server over stdio |
+
+Search supports three modes:
+
+| Mode | Best for |
+| --- | --- |
+| `lexical` | Exact names, identifiers, paths, and configuration keys |
+| `dense` | Conceptual or natural-language questions |
+| `hybrid` | The default; combines lexical and dense results with RRF |
+
+Use `--json` for machine-readable output, `--language` to filter results, and
+`--evidence` to include trimmed source spans. The `get` command returns the
+full current span for a unit id.
+
+## Adaptive Retrieval
+
+Queries are routed with a deterministic, zero-model-cost classifier. The
+classifier selects a default result count and evidence budget based on the
+question shape:
+
+| Class | Typical query | Default results | Evidence budget |
+| --- | --- | ---: | ---: |
+| `symbol` | `TokenValidator.validate` | 3 | 800 tokens |
+| `local` | `how does token validation work` | 5 | 2,000 tokens |
+| `debugging` | `why does this crash across modules` | 8 | 4,000 tokens |
+| `impact` | `what calls parse_token` | 10 | 6,000 tokens |
+
+Exact symbol queries are routed to lexical search. Impact queries are routed
+to the call graph when a target symbol can be identified. `--top-k` and
+`query_class` can override the defaults where supported.
+
+## Call Graph And Impact Analysis
+
+During indexing, urag scans supported source files for call expressions and
+stores:
+
+- The enclosing caller unit.
+- The last callee segment, such as `validate`.
+- The full written callee chain, such as `self.validate` or `os.path.exists`.
+- The call-site line number.
+
+This powers direct and multi-hop queries:
+
+```bash
+urag callers validate
+urag callers validate --depth 3
+urag search "what breaks if parse_token changes"
+```
+
+Multi-hop traversal uses breadth-first search, records the shortest hop for
+each result, and terminates safely on cycles. Import aliases are resolved for
+Python, TypeScript, Go, Rust, and C# when the index contains the relevant
+bindings:
+
+```bash
+urag callers os.path.exists
+urag callers core.http.fetch
+```
+
+The graph is static and intentionally approximate. Dynamic dispatch,
+reflection, generated code, and some instance-method chains are not resolved.
+The graph should be treated as impact evidence, not as a runtime dependency
+model.
+
+## Supported Languages
+
+| Language | Extensions | Extracted information |
+| --- | --- | --- |
+| Python | `.py`, `.pyi` | Functions, classes, methods, imports, calls, aliases |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Functions, classes, interfaces, types, enums, imports, calls, aliases |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Functions, classes, methods, imports, calls, aliases |
+| Go | `.go` | Functions, methods, structs, interfaces, imports, calls, aliases |
+| Rust | `.rs` | Functions, methods, structs, traits, enums, imports, calls, aliases |
+| Java | `.java` | Methods, constructors, classes, interfaces, enums, imports, calls |
+| C | `.c`, `.h` | Functions, structs, unions, typedefs, includes, calls |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh` | Functions, methods, classes, structs, namespaces, includes, calls |
+| C# | `.cs` | Classes, interfaces, structs, records, enums, methods, usings, calls, aliases |
+| Markdown | `.md`, `.markdown`, `.mdx` | Heading-based document chunks and hierarchy |
+
+Files are filtered by `.gitignore`, built-in exclusions, configured languages,
+and a default maximum size of 1 MB. These settings are configurable in
+`.urag/urag.toml`.
+
+## Embeddings And Configuration
+
+The default provider is a local ONNX model through FastEmbed:
 
 ```toml
 [embedding]
-provider = "local"        # local | http | none
+provider = "local"
 model = "BAAI/bge-small-en-v1.5"
 dimension = 384
-# http_url = "http://localhost:11434/v1"
-# http_api_key = ""
-# http_model = "nomic-embed-text"
-
-[index]
-languages = ["python", "typescript", "javascript", "go", "rust", "java", "c", "cpp", "markdown"]
-exclude = [".urag", ".git", "node_modules", "dist", "build", ".venv"]
 ```
 
-## Architecture
+The model is downloaded on first use and cached in `%LOCALAPPDATA%/urag` on
+Windows or `~/.cache/urag` on other systems. An OpenAI-compatible HTTP
+embedding endpoint is also supported:
 
-```
-sources ──► tree-sitter extractors ──► units (L0/L1 records)
-                                       │
-                    ┌──────────────────┼──────────────────┐
-                    ▼                  ▼                  ▼
-               FTS5 (lexical)    vec0 (dense)      files/units tables
-                    └──────────────┬──────────────────┘
-                                   ▼
-                     RRF fusion → ranked evidence packets
-                                   ▼
-                    L2 source spans loaded on demand (`get`)
+```toml
+[embedding]
+provider = "http"
+dimension = 384
+http_url = "http://localhost:11434/v1"
+http_model = "nomic-embed-text"
+http_api_key = ""
 ```
 
-| Layer | Contents | Size |
-|---|---|---|
-| L0 | qualname, signature, summary, concepts (retrieval key, embedded) | ~100–300 tokens |
-| L1 | relationships, file/line/byte pointers | ~50 tokens |
-| L2 | exact source span, loaded on demand | full unit |
+Keep API keys in the local `.urag/urag.toml` only and do not commit them.
+Projects that already have an index can use `provider = "none"` for
+lexical-only retrieval; dense retrieval and embedding new units require an
+embedding provider.
 
-## Notes
+## Git Freshness
 
-- Per-project single-file index: `.urag/index.db` (SQLite + WAL). Gitignored.
-- Embeddings default to `BAAI/bge-small-en-v1.5` (384 dims, ~25 MB, cached in
-  `%LOCALAPPDATA%\urag` or `~/.cache/urag`).
-- `tree-sitter` is pinned `<0.26` — 0.26.0 has an unfixed use-after-free
-  segfault during repo-scale traversals (py-tree-sitter issue #472).
+For Git repositories, indexed files record the commit used at indexing time.
+Search and `get` results include the short commit and a `stale` flag when the
+file differs from that indexed revision. Non-Git projects use file metadata
+checks instead.
 
-## Git-aware invalidation
+Freshness detection is best-effort. Run `urag index` after a branch switch,
+pull, or other large repository change before relying on old evidence. Static
+analysis also cannot see runtime-generated relationships.
 
-Every indexed file records the commit it was indexed at. Search results and
-evidence packets carry `commit` (8-hex) and `stale` flags:
+## MCP Server
 
-- `stale=true` means the file changed since it was indexed (uncommitted edit,
-  branch switch, pull) — treat the evidence as outdated and re-index.
-- Re-indexing uses `git status`/`git diff` to find changed files (O(changed)
-  instead of stat-ing the whole repo) and works even when file mtimes lie.
-- Non-git projects fall back to mtime-based checks automatically.
+Run urag as a stdio MCP server for an agent harness:
 
 ```bash
-urag search "parse_token" --mode lexical --json   # results include commit/stale
-urag get 190                                      # span + commit + stale flag
+urag mcp --root /path/to/project
 ```
 
-## Adaptive query classification
-
-Queries are auto-classified into budget tiers before retrieval — context is a
-per-query decision, not a fixed constant:
-
-| Class | top_k | budget | behavior |
-|---|---|---|---|
-| `symbol` | 3 | 800 tok | exact names/identifiers: lexical-only |
-| `local` | 5 | 2,000 tok | single-module implementation questions |
-| `debugging` | 8 | 4,000 tok | errors, crashes, cross-module flow |
-| `impact` | 10 | 6,000 tok | callers, dependencies, "what breaks if X" |
-
-Evidence spans returned with `--evidence` are trimmed to the class budget
-(head + truncation note; the full span stays available via `urag get`).
-
-```bash
-urag classify "what calls this method"   # -> impact (top_k=10, 6000 tok)
-urag search "why does it crash" --top-k 2
-```
-
-## Evaluating retrieval quality (`urag eval`)
-
-Compares urag against the non-urag context baselines on the same questions:
-
-```bash
-# auto-generate provable-gold questions (definitions + callers), compare default systems
-urag eval --root . --autogen 10 --top-k 5
-
-# hand-written questions.jsonl: {"query": "...", "gold_file": "src/a.py"}
-urag eval --root . --questions questions.jsonl
-
-# add the LLM answer-quality tier (OpenAI-compatible endpoint)
-urag eval --root . --autogen 10 --judge-url https://api.openai.com/v1 --judge-model gpt-4o-mini --judge-key $KEY
-
-# machine-readable report
-urag eval --root . --autogen 10 --json --report eval.json
-```
-
-Systems compared per question: `urag-hybrid`, `urag-lexical`, `rg` (grep
-baseline), `chunk` (structure-free fixed-size chunk embeddings), and optional
-`oracle` (whole gold files). Metrics: **recall@k, precision@k, MRR,
-tokens/retrieval, p50/p95 latency**. Definition and call questions get
-provable gold from the index itself (the unit's file / the actual
-`call_edges`), so evaluation works without hand labeling; doc/conceptual
-questions need a hand-written `--questions` file.
-
-Call-graph suites (provable gold, deterministic — seeded shuffle):
-
-```bash
-# multi-hop: gold = ALL transitive callers (hops 1..depth), measured via indirect_recall
-urag eval --root . --transitive 25 --systems urag-callers,urag-transitive
-
-# import-alias: gold = units whose aliased call sites resolve to a fully-qualified target
-urag eval --root . --alias 25 --systems urag-callers
-
-# one-shot benchmark runner (fixture + optional real repo, fresh index per run)
-uv run python benchmarks/run_bench.py --self
-```
-
-## Call graph (impact analysis)
-
-Every function body is scanned for call sites (python `call`, ts/js/go/rust/c/cpp
-`call_expression`, java `method_invocation`, c# `invocation_expression`), stored
-as `call_edges(caller_unit, callee, callee_full, line)`. Impact questions
-("what calls X", "what breaks if X changes") are answered from the graph
-instead of text similarity:
-
-```bash
-urag search "what calls index_all"     # -> mode=calls, real callers + line numbers
-urag callers fit_evidence              # dedicated command
-urag callers stop --depth 3            # multi-hop: callers-of-callers, each tagged with its hop
-```
+Example generic MCP configuration:
 
 ```json
-{"query": "what calls index_all", "mode": "calls", "results": [
-  {"qualname": "init", "file": "src/urag/cli.py", "lines": [57, 82], "calls": "indexer.index_all", "call_line": 81}
-]}
-```
-
-Matching normalizes the last segment (`self.validate`, `os.path.exists`,
-`TokenValidator::validate` all match `validate`); constructor calls are
-included (who instantiates X is an impact question). Alias resolution is
-approximate by design — dynamic/reflective calls are invisible to static
-analysis.
-
-### Multi-hop traversal
-
-`urag callers NAME --depth N` walks callers-of-callers up to N hops (BFS over
-`call_edges`, cycles safe; each result carries its shortest `hop`, 1 = direct
-caller). The MCP `callers` tool takes the same `depth` argument. Exact-match
-walking means indirect edges through instance dispatch may be missed — call
-sites whose last segment is recorded are found, chains that are only reachable
-via `self.`/`this.` method resolution are not (the raw `callee_full` is used).
-
-### Import-alias resolution
-
-Fully-qualified queries are resolved through per-file import bindings captured
-at index time (`import_aliases` table): `import os.path as op` + `op.exists()`
-now answers "who calls os.path.exists". Supported forms: python
-(`import x as y`, `from m import n as y`, bare `from m import n`), typescript
-(namespace, named-with-as, default, bare named), go (`import a "pkg/path"`),
-rust (`use path as alias`), c# (`using A = B`). Alias bindings shadowed by a
-local symbol in the same file are ignored; hits resolved through an alias carry
-`resolved_to`. Existing indexes need a re-index (`urag index`) once to populate
-the alias table.
-
-## MCP server (agent harnesses)
-
-```bash
-urag mcp --root /path/to/project      # stdio MCP server
-# root also auto-discovers from cwd; set URAG_ROOT env var to override
-```
-
-Tools: `search`, `fetch_unit`, `index_now`, `status`, `init_project`.
-Results are compact evidence packets (signature + summary + file:line + ranks);
-exact source spans are fetched only for the units you need.
-
-### opencode
-
-```json
-// opencode.json
-{
-  "mcp": {
-    "urag": {
-      "type": "local",
-      "command": ["urag", "mcp", "--root", "/path/to/project"],
-      "enabled": true
-    }
-  }
-}
-```
-
-### Claude Code
-
-```json
-// .mcp.json
 {
   "mcpServers": {
     "urag": {
@@ -280,42 +288,94 @@ exact source spans are fetched only for the units you need.
 }
 ```
 
-### Cursor / generic
+The server exposes these tools:
 
-```json
-{
-  "mcpServers": {
-    "urag": {
-      "command": "urag",
-      "args": ["mcp", "--root", "/path/to/project"],
-      "type": "stdio"
-    }
-  }
-}
-```
+- `search`: Search symbols and documentation with compact result packets.
+- `fetch_unit`: Fetch exact source lines for a result id.
+- `callers`: Query direct or multi-hop callers.
+- `index_now`: Incrementally re-index changed files.
+- `status`: Return index statistics and configuration.
+- `init_project`: Create and populate an index for a project.
 
-## Skill files (harness guidance)
+The intended agent workflow is to search with `top_k=3-5`, fetch exact spans
+only for the most relevant one to three units, and call `index_now` after
+changes.
 
-`skills/urag/SKILL.md` teaches agents the token-efficient workflow (search
-small → fetch evidence only for what you use). Install per harness:
+## Agent Skill
+
+The repository includes `skills/urag/SKILL.md`, a small instruction file for
+agent harnesses. It teaches the search-first, fetch-evidence-on-demand
+workflow and is included in built packages.
+
+For harnesses that use local skill directories, install it with the harness's
+normal skill installation mechanism. For example:
 
 ```bash
-# opencode (global)
 cp -r skills/urag ~/.config/opencode/skills/urag
-
-# Claude Code
 cp -r skills/urag ~/.claude/skills/urag
 ```
 
-## Roadmap
+## Measuring Retrieval
 
-- [x] MCP server (`urag mcp`) for Claude Code / opencode / Cursor
-- [x] Skill files (`skills/urag/SKILL.md`) for agent harnesses
-- [x] Git-aware invalidation (per-commit provenance, stale-evidence flags)
-- [x] More languages (go, rust, java, c, c++, c#)
-- [x] Adaptive query-classifier → per-query token budgets
-- [x] Call-graph pass — impact queries answered from real call edges
-- [x] Multi-hop traversal (callers-of-callers) on demand
-- [x] Import-alias resolution for fully-qualified callee chains
-- [ ] More languages (kotlin, swift, ruby, php, zig)
-- [ ] Train the query router from production traces
+The evaluation harness compares urag with non-structural baselines on the same
+questions:
+
+```bash
+urag eval --root . --autogen 10 --top-k 5
+urag eval --root . --questions questions.jsonl
+urag eval --root . --transitive 25 --alias 25 \
+  --systems urag-callers,urag-transitive,urag-hybrid
+uv run python benchmarks/run_bench.py --self
+```
+
+It measures unit recall@k, file recall@k, precision, MRR, approximate tokens
+per retrieval, and p50/p95 latency. Definition and call questions can be
+generated with provable gold data from the index. Custom conceptual questions
+can be supplied as JSONL:
+
+```json
+{"query": "where is TokenValidator defined", "gold_file": "src/auth.py"}
+```
+
+### Checked-In Benchmark Snapshot
+
+The following values come from the reports in `benchmarks/reports/`, using
+`top_k=5`. They are reference measurements from one environment, not
+performance guarantees.
+
+| Dataset | System | Questions | Unit recall | Precision | MRR | p50 | Mean compact tokens |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Synthetic fixture | `urag-callers` | 22 | 1.000 | 1.000 | 1.000 | 0.14 ms | 5.0 |
+| Synthetic fixture | `urag-transitive` | 22 | 1.000 | 1.000 | 1.000 | 0.11 ms | 6.4 |
+| urag repository | `urag-callers` | 47 | 1.000 | 1.000 | 1.000 | 0.48 ms | 41.4 |
+| urag repository | `urag-transitive` | 47 | 1.000 | 1.000 | 1.000 | 10.38 ms | 78.2 |
+| urag repository | `urag-hybrid` | 57 | 0.316 | 0.077 | 0.252 | 4.38 ms | 134.7 |
+
+The transitive system reached `indirect_recall=1.000` on the synthetic
+fixture and `0.440` on the checked-in urag repository report. In the current
+evaluation harness, unit recall is binary per question: it means at least one
+gold unit was retrieved, not that every gold unit was returned. Graph systems
+also run on graph-eligible questions, while the hybrid row includes the full
+generated question set, so the rows are directional rather than a universal
+ranking.
+
+The efficiency gain urag is designed to provide comes from returning compact
+metadata first and loading source spans only when requested. Actual latency,
+token count, and retrieval quality depend on repository size, embedding
+provider, query type, and index state.
+
+## Development
+
+```bash
+uv sync
+uv run pytest -q
+uv run urag --version
+```
+
+CI runs the test suite and CLI smoke check on Python 3.12 and 3.13. The test
+suite covers extractors, call extraction, multi-hop traversal, alias
+resolution, evaluation metrics, and benchmark fixtures.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

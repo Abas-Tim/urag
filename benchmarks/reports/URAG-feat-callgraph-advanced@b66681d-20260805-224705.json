@@ -1,0 +1,2876 @@
+{
+  "top_k": 5,
+  "questions": [
+    {
+      "query": "where is test_alias_resolved defined",
+      "label": "definition",
+      "gold_file": "tests/test_import_alias.py",
+      "gold_unit_ids": [
+        532
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is Database.set_meta defined",
+      "label": "definition",
+      "gold_file": "src/urag/db.py",
+      "gold_unit_ids": [
+        147
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is test_cycle_terminates defined",
+      "label": "definition",
+      "gold_file": "tests/test_multi_hop.py",
+      "gold_unit_ids": [
+        553
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is Retriever.search_transitive defined",
+      "label": "definition",
+      "gold_file": "src/urag/retrieve.py",
+      "gold_unit_ids": [
+        447
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is RustExtractor._func defined",
+      "label": "definition",
+      "gold_file": "src/urag/extractors/native_ext.py",
+      "gold_unit_ids": [
+        299
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is test_autogen_alias_python defined",
+      "label": "definition",
+      "gold_file": "tests/test_benchmarks.py",
+      "gold_unit_ids": [
+        477
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is _signature defined",
+      "label": "definition",
+      "gold_file": "src/urag/extractors/native_ext.py",
+      "gold_unit_ids": [
+        281
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is _point defined",
+      "label": "definition",
+      "gold_file": "src/urag/extractors/python_ext.py",
+      "gold_unit_ids": [
+        334
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is CallSite defined",
+      "label": "definition",
+      "gold_file": "src/urag/models.py",
+      "gold_unit_ids": [
+        425
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "where is HttpEmbedder.embed_passages defined",
+      "label": "definition",
+      "gold_file": "src/urag/embed.py",
+      "gold_unit_ids": [
+        191
+      ],
+      "target": "",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls autogen_questions",
+      "label": "call",
+      "gold_file": "tests/test_eval.py",
+      "gold_unit_ids": [
+        504,
+        505
+      ],
+      "target": "autogen_questions",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls row(\"file",
+      "label": "call",
+      "gold_file": "src/urag/cli.py",
+      "gold_unit_ids": [
+        117
+      ],
+      "target": "row(\"file",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls relative_to",
+      "label": "call",
+      "gold_file": "benchmarks/run_bench.py",
+      "gold_unit_ids": [
+        44,
+        222,
+        391,
+        392,
+        393,
+        394,
+        395,
+        470
+      ],
+      "target": "relative_to",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls ch(q) or _UP",
+      "label": "call",
+      "gold_file": "src/urag/classify.py",
+      "gold_unit_ids": [
+        88
+      ],
+      "target": "ch(q) or _UP",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls stage3",
+      "label": "call",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/core/chain.py",
+      "gold_unit_ids": [
+        11
+      ],
+      "target": "stage3",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls qs)",
+      "label": "call",
+      "gold_file": "src/urag/cli.py",
+      "gold_unit_ids": [
+        112
+      ],
+      "target": "qs)",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls Option(Fal",
+      "label": "call",
+      "gold_file": "src/urag/cli.py",
+      "gold_unit_ids": [
+        113,
+        114,
+        115
+      ],
+      "target": "Option(Fal",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls search_transitive(\"",
+      "label": "call",
+      "gold_file": "tests/test_multi_hop.py",
+      "gold_unit_ids": [
+        556,
+        557
+      ],
+      "target": "search_transitive(\"",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls keys",
+      "label": "call",
+      "gold_file": "src/urag/eval.py",
+      "gold_unit_ids": [
+        233
+      ],
+      "target": "keys",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "what calls sha256",
+      "label": "call",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395
+      ],
+      "target": "sha256",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who transitively calls relative_to",
+      "label": "transitive",
+      "gold_file": "benchmarks/run_bench.py",
+      "gold_unit_ids": [
+        44,
+        222,
+        391,
+        392,
+        393,
+        394,
+        395,
+        470,
+        108,
+        109,
+        413,
+        461,
+        460,
+        414,
+        110
+      ],
+      "target": "relative_to",
+      "depth": 3,
+      "gold_hops": {
+        "44": 1,
+        "222": 1,
+        "391": 1,
+        "392": 1,
+        "393": 1,
+        "394": 1,
+        "395": 1,
+        "470": 1,
+        "108": 2,
+        "109": 2,
+        "413": 2,
+        "461": 2,
+        "460": 2,
+        "414": 3,
+        "110": 3
+      }
+    },
+    {
+      "query": "who transitively calls stage3",
+      "label": "transitive",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/core/chain.py",
+      "gold_unit_ids": [
+        11,
+        10,
+        14,
+        9
+      ],
+      "target": "stage3",
+      "depth": 3,
+      "gold_hops": {
+        "11": 1,
+        "10": 2,
+        "14": 2,
+        "9": 3
+      }
+    },
+    {
+      "query": "who transitively calls keys",
+      "label": "transitive",
+      "gold_file": "src/urag/eval.py",
+      "gold_unit_ids": [
+        233,
+        476
+      ],
+      "target": "keys",
+      "depth": 3,
+      "gold_hops": {
+        "233": 1,
+        "476": 2
+      }
+    },
+    {
+      "query": "who transitively calls sha256",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395,
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "sha256",
+      "depth": 3,
+      "gold_hops": {
+        "395": 1,
+        "392": 2,
+        "393": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who transitively calls _make",
+      "label": "transitive",
+      "gold_file": "src/urag/extractors/markdown_ext.py",
+      "gold_unit_ids": [
+        266,
+        291,
+        292,
+        299,
+        300,
+        306,
+        307,
+        314,
+        316,
+        317,
+        324,
+        326,
+        265,
+        288,
+        296,
+        312,
+        341,
+        359,
+        361,
+        304,
+        323,
+        395,
+        492,
+        503,
+        513,
+        514,
+        515,
+        529,
+        539,
+        547,
+        559,
+        560,
+        561,
+        562,
+        563,
+        287,
+        295,
+        303,
+        311,
+        320,
+        338,
+        343,
+        356
+      ],
+      "target": "_make",
+      "depth": 3,
+      "gold_hops": {
+        "266": 1,
+        "291": 1,
+        "292": 1,
+        "299": 1,
+        "300": 1,
+        "306": 1,
+        "307": 1,
+        "314": 1,
+        "316": 1,
+        "317": 1,
+        "324": 1,
+        "326": 1,
+        "265": 2,
+        "288": 2,
+        "296": 2,
+        "312": 2,
+        "341": 2,
+        "359": 2,
+        "361": 2,
+        "304": 2,
+        "323": 2,
+        "395": 3,
+        "492": 3,
+        "503": 3,
+        "513": 3,
+        "514": 3,
+        "515": 3,
+        "529": 3,
+        "539": 3,
+        "547": 3,
+        "559": 3,
+        "560": 3,
+        "561": 3,
+        "562": 3,
+        "563": 3,
+        "287": 3,
+        "295": 3,
+        "303": 3,
+        "311": 3,
+        "320": 3,
+        "338": 3,
+        "343": 3,
+        "356": 3
+      }
+    },
+    {
+      "query": "who transitively calls _point",
+      "label": "transitive",
+      "gold_file": "src/urag/extractors/native_ext.py",
+      "gold_unit_ids": [
+        282,
+        293,
+        301,
+        308,
+        318,
+        327,
+        342,
+        343,
+        344,
+        360,
+        361,
+        362,
+        363,
+        266,
+        291,
+        292,
+        299,
+        300,
+        306,
+        307,
+        314,
+        316,
+        317,
+        324,
+        326,
+        288,
+        296,
+        304,
+        312,
+        323,
+        359,
+        341,
+        265,
+        287,
+        295,
+        303,
+        311,
+        320,
+        338,
+        356
+      ],
+      "target": "_point",
+      "depth": 3,
+      "gold_hops": {
+        "282": 1,
+        "293": 1,
+        "301": 1,
+        "308": 1,
+        "318": 1,
+        "327": 1,
+        "342": 1,
+        "343": 1,
+        "344": 1,
+        "360": 1,
+        "361": 1,
+        "362": 1,
+        "363": 1,
+        "266": 2,
+        "291": 2,
+        "292": 2,
+        "299": 2,
+        "300": 2,
+        "306": 2,
+        "307": 2,
+        "314": 2,
+        "316": 2,
+        "317": 2,
+        "324": 2,
+        "326": 2,
+        "288": 2,
+        "296": 2,
+        "304": 2,
+        "312": 2,
+        "323": 2,
+        "359": 2,
+        "341": 2,
+        "265": 3,
+        "287": 3,
+        "295": 3,
+        "303": 3,
+        "311": 3,
+        "320": 3,
+        "338": 3,
+        "356": 3
+      }
+    },
+    {
+      "query": "who transitively calls cwd",
+      "label": "transitive",
+      "gold_file": "src/urag/config.py",
+      "gold_unit_ids": [
+        137,
+        107,
+        413,
+        109,
+        110,
+        111,
+        414
+      ],
+      "target": "cwd",
+      "depth": 3,
+      "gold_hops": {
+        "137": 1,
+        "107": 2,
+        "413": 2,
+        "109": 3,
+        "110": 3,
+        "111": 3,
+        "414": 3
+      }
+    },
+    {
+      "query": "who transitively calls escape",
+      "label": "transitive",
+      "gold_file": "src/urag/db.py",
+      "gold_unit_ids": [
+        166,
+        169,
+        443,
+        446,
+        532,
+        533,
+        534,
+        535,
+        536,
+        537,
+        550,
+        447,
+        551,
+        552,
+        553,
+        111,
+        413,
+        538
+      ],
+      "target": "escape",
+      "depth": 3,
+      "gold_hops": {
+        "166": 1,
+        "169": 2,
+        "443": 2,
+        "446": 2,
+        "532": 2,
+        "533": 2,
+        "534": 2,
+        "535": 2,
+        "536": 2,
+        "537": 2,
+        "550": 2,
+        "447": 3,
+        "551": 3,
+        "552": 3,
+        "553": 3,
+        "111": 3,
+        "413": 3,
+        "538": 3
+      }
+    },
+    {
+      "query": "who transitively calls str",
+      "label": "transitive",
+      "gold_file": "benchmarks/run_bench.py",
+      "gold_unit_ids": [
+        42,
+        44,
+        133,
+        145,
+        183,
+        213,
+        220,
+        369,
+        413,
+        461,
+        136,
+        111,
+        436,
+        481,
+        538,
+        370,
+        371,
+        372,
+        373,
+        414,
+        110,
+        107,
+        108,
+        470,
+        503,
+        530,
+        539,
+        548,
+        388,
+        392,
+        441,
+        448
+      ],
+      "target": "str",
+      "depth": 3,
+      "gold_hops": {
+        "42": 1,
+        "44": 1,
+        "133": 1,
+        "145": 1,
+        "183": 1,
+        "213": 1,
+        "220": 1,
+        "369": 1,
+        "413": 1,
+        "461": 1,
+        "136": 2,
+        "111": 2,
+        "436": 2,
+        "481": 2,
+        "538": 2,
+        "370": 2,
+        "371": 2,
+        "372": 2,
+        "373": 2,
+        "414": 2,
+        "110": 2,
+        "107": 3,
+        "108": 3,
+        "470": 3,
+        "503": 3,
+        "530": 3,
+        "539": 3,
+        "548": 3,
+        "388": 3,
+        "392": 3,
+        "441": 3,
+        "448": 3
+      }
+    },
+    {
+      "query": "who transitively calls group",
+      "label": "transitive",
+      "gold_file": "src/urag/eval.py",
+      "gold_unit_ids": [
+        234,
+        265,
+        445,
+        236,
+        471,
+        472,
+        473,
+        395,
+        492,
+        503,
+        513,
+        514,
+        515,
+        529,
+        539,
+        547,
+        559,
+        560,
+        561,
+        562,
+        563,
+        443,
+        494,
+        477,
+        478,
+        392,
+        393,
+        530,
+        548,
+        111,
+        413
+      ],
+      "target": "group",
+      "depth": 3,
+      "gold_hops": {
+        "234": 1,
+        "265": 1,
+        "445": 1,
+        "236": 2,
+        "471": 2,
+        "472": 2,
+        "473": 2,
+        "395": 2,
+        "492": 2,
+        "503": 2,
+        "513": 2,
+        "514": 2,
+        "515": 2,
+        "529": 2,
+        "539": 2,
+        "547": 2,
+        "559": 2,
+        "560": 2,
+        "561": 2,
+        "562": 2,
+        "563": 2,
+        "443": 2,
+        "494": 2,
+        "477": 3,
+        "478": 3,
+        "392": 3,
+        "393": 3,
+        "530": 3,
+        "548": 3,
+        "111": 3,
+        "413": 3
+      }
+    },
+    {
+      "query": "who transitively calls count",
+      "label": "transitive",
+      "gold_file": "src/urag/retrieve.py",
+      "gold_unit_ids": [
+        438,
+        111,
+        412,
+        413
+      ],
+      "target": "count",
+      "depth": 3,
+      "gold_hops": {
+        "438": 1,
+        "111": 2,
+        "412": 2,
+        "413": 3
+      }
+    },
+    {
+      "query": "who transitively calls BadParameter",
+      "label": "transitive",
+      "gold_file": "src/urag/cli.py",
+      "gold_unit_ids": [
+        107,
+        109,
+        110,
+        111,
+        413
+      ],
+      "target": "BadParameter",
+      "depth": 3,
+      "gold_hops": {
+        "107": 1,
+        "109": 2,
+        "110": 2,
+        "111": 2,
+        "413": 3
+      }
+    },
+    {
+      "query": "who transitively calls _embedder",
+      "label": "transitive",
+      "gold_file": "src/urag/cli.py",
+      "gold_unit_ids": [
+        108,
+        109,
+        110,
+        111,
+        413,
+        414
+      ],
+      "target": "_embedder",
+      "depth": 3,
+      "gold_hops": {
+        "108": 1,
+        "109": 1,
+        "110": 1,
+        "111": 1,
+        "413": 1,
+        "414": 2
+      }
+    },
+    {
+      "query": "who transitively calls hexdigest",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395,
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "hexdigest",
+      "depth": 3,
+      "gold_hops": {
+        "395": 1,
+        "392": 2,
+        "393": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who transitively calls set_meta",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460,
+        414,
+        110
+      ],
+      "target": "set_meta",
+      "depth": 3,
+      "gold_hops": {
+        "392": 1,
+        "393": 1,
+        "108": 2,
+        "109": 2,
+        "413": 2,
+        "461": 2,
+        "470": 2,
+        "460": 2,
+        "414": 3,
+        "110": 3
+      }
+    },
+    {
+      "query": "who transitively calls field",
+      "label": "transitive",
+      "gold_file": "src/urag/config.py",
+      "gold_unit_ids": [
+        127,
+        129,
+        212,
+        426,
+        134,
+        230,
+        233,
+        236,
+        237,
+        479,
+        480,
+        481,
+        506,
+        507,
+        157,
+        136,
+        504,
+        505,
+        476,
+        477,
+        478,
+        392,
+        413
+      ],
+      "target": "field",
+      "depth": 3,
+      "gold_hops": {
+        "127": 1,
+        "129": 1,
+        "212": 1,
+        "426": 1,
+        "134": 2,
+        "230": 2,
+        "233": 2,
+        "236": 2,
+        "237": 2,
+        "479": 2,
+        "480": 2,
+        "481": 2,
+        "506": 2,
+        "507": 2,
+        "157": 2,
+        "136": 3,
+        "504": 3,
+        "505": 3,
+        "476": 3,
+        "477": 3,
+        "478": 3,
+        "392": 3,
+        "413": 3
+      }
+    },
+    {
+      "query": "who transitively calls query_embed",
+      "label": "transitive",
+      "gold_file": "src/urag/embed.py",
+      "gold_unit_ids": [
+        186,
+        223,
+        399,
+        443,
+        111,
+        413
+      ],
+      "target": "query_embed",
+      "depth": 3,
+      "gold_hops": {
+        "186": 1,
+        "223": 2,
+        "399": 2,
+        "443": 2,
+        "111": 3,
+        "413": 3
+      }
+    },
+    {
+      "query": "who transitively calls dict",
+      "label": "transitive",
+      "gold_file": "src/urag/db.py",
+      "gold_unit_ids": [
+        149,
+        168,
+        397,
+        539,
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "dict",
+      "depth": 3,
+      "gold_hops": {
+        "149": 1,
+        "168": 1,
+        "397": 1,
+        "539": 1,
+        "392": 2,
+        "393": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who transitively calls replace_import_aliases",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395,
+        529,
+        539,
+        392,
+        393,
+        530,
+        548,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "replace_import_aliases",
+      "depth": 3,
+      "gold_hops": {
+        "395": 1,
+        "529": 1,
+        "539": 1,
+        "392": 2,
+        "393": 2,
+        "530": 2,
+        "548": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who transitively calls replace_call_edges",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395,
+        503,
+        529,
+        547,
+        392,
+        393,
+        530,
+        548,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "replace_call_edges",
+      "depth": 3,
+      "gold_hops": {
+        "395": 1,
+        "503": 1,
+        "529": 1,
+        "547": 1,
+        "392": 2,
+        "393": 2,
+        "530": 2,
+        "548": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who transitively calls round",
+      "label": "transitive",
+      "gold_file": "src/urag/mcp_server.py",
+      "gold_unit_ids": [
+        412,
+        423,
+        413,
+        111,
+        436,
+        481,
+        538,
+        414
+      ],
+      "target": "round",
+      "depth": 3,
+      "gold_hops": {
+        "412": 1,
+        "423": 1,
+        "413": 2,
+        "111": 2,
+        "436": 2,
+        "481": 2,
+        "538": 2,
+        "414": 3
+      }
+    },
+    {
+      "query": "who transitively calls _Handler",
+      "label": "transitive",
+      "gold_file": "src/urag/watcher.py",
+      "gold_unit_ids": [
+        461,
+        110
+      ],
+      "target": "_Handler",
+      "depth": 3,
+      "gold_hops": {
+        "461": 1,
+        "110": 2
+      }
+    },
+    {
+      "query": "who transitively calls lexical_search",
+      "label": "transitive",
+      "gold_file": "src/urag/retrieve.py",
+      "gold_unit_ids": [
+        443,
+        111,
+        413,
+        414
+      ],
+      "target": "lexical_search",
+      "depth": 3,
+      "gold_hops": {
+        "443": 1,
+        "111": 2,
+        "413": 2,
+        "414": 3
+      }
+    },
+    {
+      "query": "who transitively calls _index_file",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460,
+        414,
+        110
+      ],
+      "target": "_index_file",
+      "depth": 3,
+      "gold_hops": {
+        "392": 1,
+        "393": 1,
+        "108": 2,
+        "109": 2,
+        "413": 2,
+        "461": 2,
+        "470": 2,
+        "460": 2,
+        "414": 3,
+        "110": 3
+      }
+    },
+    {
+      "query": "who transitively calls _map_calls",
+      "label": "transitive",
+      "gold_file": "src/urag/indexer.py",
+      "gold_unit_ids": [
+        395,
+        392,
+        393,
+        108,
+        109,
+        413,
+        461,
+        470,
+        460
+      ],
+      "target": "_map_calls",
+      "depth": 3,
+      "gold_hops": {
+        "395": 1,
+        "392": 2,
+        "393": 2,
+        "108": 3,
+        "109": 3,
+        "413": 3,
+        "461": 3,
+        "470": 3,
+        "460": 3
+      }
+    },
+    {
+      "query": "who calls core.http.fetch",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/app/api.py",
+      "gold_unit_ids": [
+        2,
+        3
+      ],
+      "target": "core.http.fetch",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls core.auth.validate",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/app/auth.py",
+      "gold_unit_ids": [
+        5
+      ],
+      "target": "core.auth.validate",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls os.path.exists",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/core/utils.py",
+      "gold_unit_ids": [
+        17
+      ],
+      "target": "os.path.exists",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls os.path.isdir",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/core/utils.py",
+      "gold_unit_ids": [
+        18
+      ],
+      "target": "os.path.isdir",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls myproj.helpers.Start",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/goapp/main.go",
+      "gold_unit_ids": [
+        20
+      ],
+      "target": "myproj.helpers.Start",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls Common.Logging.Info",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/mvc/Program.cs",
+      "gold_unit_ids": [
+        23
+      ],
+      "target": "Common.Logging.Info",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls sdk.core.makeClient",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/sdk/app.ts",
+      "gold_unit_ids": [
+        26
+      ],
+      "target": "sdk.core.makeClient",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls sdk.net.connect",
+      "label": "alias",
+      "gold_file": "benchmarks/fixtures/callgraph_fixture/sdk/app.ts",
+      "gold_unit_ids": [
+        27
+      ],
+      "target": "sdk.net.connect",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls tree_sitter_c_sharp.language",
+      "label": "alias",
+      "gold_file": "src/urag/extractors/native_ext.py",
+      "gold_unit_ids": [
+        320,
+        321,
+        322
+      ],
+      "target": "tree_sitter_c_sharp.language",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls tree_sitter_javascript.language",
+      "label": "alias",
+      "gold_file": "src/urag/extractors/ts_ext.py",
+      "gold_unit_ids": [
+        351
+      ],
+      "target": "tree_sitter_javascript.language",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls tree_sitter_typescript.language_typescript",
+      "label": "alias",
+      "gold_file": "src/urag/extractors/ts_ext.py",
+      "gold_unit_ids": [
+        351
+      ],
+      "target": "tree_sitter_typescript.language_typescript",
+      "depth": 1,
+      "gold_hops": {}
+    },
+    {
+      "query": "who calls tree_sitter_typescript.language_tsx",
+      "label": "alias",
+      "gold_file": "src/urag/extractors/ts_ext.py",
+      "gold_unit_ids": [
+        351
+      ],
+      "target": "tree_sitter_typescript.language_tsx",
+      "depth": 1,
+      "gold_hops": {}
+    }
+  ],
+  "systems": {
+    "urag-callers": {
+      "n": 47,
+      "unit_recall": 1.0,
+      "file_recall": 1.0,
+      "precision": 1.0,
+      "indirect_recall": 0.0,
+      "mrr": 1.0,
+      "mean_tokens": 41.361702127659576,
+      "mean_sec": 0.0029222255255630675,
+      "p50_sec": 0.00048430002061650157,
+      "p95_sec": 0.010881199967116117
+    },
+    "urag-transitive": {
+      "n": 47,
+      "unit_recall": 1.0,
+      "file_recall": 1.0,
+      "precision": 1.0,
+      "indirect_recall": 0.4400408373875866,
+      "mrr": 1.0,
+      "mean_tokens": 78.2127659574468,
+      "mean_sec": 0.025229212764819015,
+      "p50_sec": 0.010378900042269379,
+      "p95_sec": 0.11816720000933856
+    },
+    "urag-hybrid": {
+      "n": 57,
+      "unit_recall": 0.3157894736842105,
+      "file_recall": 0.7192982456140351,
+      "precision": 0.07719298245614035,
+      "indirect_recall": 0.02603921568627451,
+      "mrr": 0.252046783625731,
+      "mean_tokens": 134.73684210526315,
+      "mean_sec": 0.005122838592924701,
+      "p50_sec": 0.0043827000190503895,
+      "p95_sec": 0.00977409997722134
+    }
+  },
+  "per_query": {
+    "urag-callers": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 24,
+        "seconds": 0.00048379995860159397,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 21,
+        "seconds": 0.00044430000707507133,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 61,
+        "seconds": 0.0005514000076800585,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.00029609998455271125,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.0004162000259384513,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 92,
+        "seconds": 0.0004197999951429665,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 216,
+        "seconds": 0.00045929994666948915,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 44,
+        "seconds": 0.0004949999856762588,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 40,
+        "seconds": 0.00045039999531582,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 10,
+        "seconds": 0.0003890999942086637,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 61,
+        "seconds": 0.00038489996222779155,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00041740003507584333,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 40,
+        "seconds": 0.0004159999662078917,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 10,
+        "seconds": 0.00032759999157860875,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 115,
+        "seconds": 0.0005576999974437058,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 151,
+        "seconds": 0.0006369000184349716,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 32,
+        "seconds": 0.0005576999974437058,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 70,
+        "seconds": 0.00031949998810887337,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 89,
+        "seconds": 0.0006152000278234482,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 78,
+        "seconds": 0.0005734000005759299,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 46,
+        "seconds": 0.00047120003728196025,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 16,
+        "seconds": 0.0004133000038564205,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 271,
+        "seconds": 0.0005311999702826142,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 10,
+        "seconds": 0.00048480002442374825,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 32,
+        "seconds": 0.0005214999546296895,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 15,
+        "seconds": 0.0005600000149570405,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 12,
+        "seconds": 0.000298099999781698,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 41,
+        "seconds": 0.0004749000072479248,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 32,
+        "seconds": 0.0004632999771274626,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 41,
+        "seconds": 0.0004629999748431146,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 32,
+        "seconds": 0.00043789995834231377,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 23,
+        "seconds": 0.0004322999739088118,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 39,
+        "seconds": 0.00042340002255514264,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 32,
+        "seconds": 0.00048430002061650157,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 10,
+        "seconds": 0.00047420000191777945,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.01110920001519844,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.010881199967116117,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.010821899981237948,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.0086864999611862,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.009091700019780546,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.01060079998569563,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 0.009859699988737702,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.010120999999344349,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 58,
+        "seconds": 0.010862099996302277,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.0099398999591358,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.00831030000699684,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.010915199993178248,
+        "n_hits": 1
+      }
+    ],
+    "urag-transitive": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 24,
+        "seconds": 0.00044440000783652067,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 21,
+        "seconds": 0.0003961999900639057,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 61,
+        "seconds": 0.0006487999926321208,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.00025270000332966447,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.00038709997897967696,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 92,
+        "seconds": 0.00039770000148564577,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 216,
+        "seconds": 0.00041310000233352184,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 44,
+        "seconds": 0.0004467000253498554,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 40,
+        "seconds": 0.00036639999598264694,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 10,
+        "seconds": 0.00031460000900551677,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 61,
+        "seconds": 0.06269059999613091,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 13,
+        "seconds": 0.0014777000178582966,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 48,
+        "seconds": 0.0010116000194102526,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.5,
+        "mrr": 1.0,
+        "tokens": 138,
+        "seconds": 0.026878400007262826,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 115,
+        "seconds": 0.1664394999970682,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 151,
+        "seconds": 0.24874429998453707,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.6666666666666666,
+        "mrr": 1.0,
+        "tokens": 165,
+        "seconds": 0.0016645000432617962,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.23529411764705882,
+        "mrr": 1.0,
+        "tokens": 219,
+        "seconds": 0.04804120003245771,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 89,
+        "seconds": 0.11816720000933856,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.07142857142857142,
+        "mrr": 1.0,
+        "tokens": 95,
+        "seconds": 0.042055899975821376,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 159,
+        "seconds": 0.0014393999590538442,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 214,
+        "seconds": 0.0021306999842636287,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.0,
+        "mrr": 1.0,
+        "tokens": 271,
+        "seconds": 0.0025459000025875866,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.5,
+        "mrr": 1.0,
+        "tokens": 138,
+        "seconds": 0.03151090000756085,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.375,
+        "mrr": 1.0,
+        "tokens": 180,
+        "seconds": 0.03239960002247244,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.05263157894736842,
+        "mrr": 1.0,
+        "tokens": 45,
+        "seconds": 0.015380199998617172,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.8,
+        "mrr": 1.0,
+        "tokens": 94,
+        "seconds": 0.038083699997514486,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.125,
+        "mrr": 1.0,
+        "tokens": 48,
+        "seconds": 0.05000069999368861,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.2,
+        "mrr": 1.0,
+        "tokens": 64,
+        "seconds": 0.029757599986623973,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.1,
+        "mrr": 1.0,
+        "tokens": 48,
+        "seconds": 0.03162349999183789,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.5,
+        "mrr": 1.0,
+        "tokens": 141,
+        "seconds": 0.023831000027712435,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 74,
+        "seconds": 0.0011682999902404845,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 1.0,
+        "mrr": 1.0,
+        "tokens": 145,
+        "seconds": 0.012426899978891015,
+        "n_hits": 4
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.375,
+        "mrr": 1.0,
+        "tokens": 180,
+        "seconds": 0.03642709995619953,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": 0.5,
+        "mrr": 1.0,
+        "tokens": 138,
+        "seconds": 0.0324358000070788,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.010918599960859865,
+        "n_hits": 2
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.009540500002913177,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.008866599993780255,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 4,
+        "seconds": 0.010378900042269379,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.011015500000212342,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 3,
+        "seconds": 0.009243600012268871,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 5,
+        "seconds": 0.01033859996823594,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 8,
+        "seconds": 0.008667199988849461,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 58,
+        "seconds": 0.011038500000722706,
+        "n_hits": 3
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.010839599999599159,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.012748299981467426,
+        "n_hits": 1
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 1.0,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 9,
+        "seconds": 0.00977720000082627,
+        "n_hits": 1
+      }
+    ],
+    "urag-hybrid": [
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 33,
+        "seconds": 0.035902999981772155,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 53,
+        "seconds": 0.004408899985719472,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 34,
+        "seconds": 0.00401219999184832,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 126,
+        "seconds": 0.003887799975927919,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 97,
+        "seconds": 0.0054641999886371195,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 41,
+        "seconds": 0.0050274000386707485,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 47,
+        "seconds": 0.005209599970839918,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 66,
+        "seconds": 0.010973999975249171,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 197,
+        "seconds": 0.005797999969217926,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 103,
+        "seconds": 0.005364999989978969,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 260,
+        "seconds": 0.004495600005611777,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 115,
+        "seconds": 0.004024000023491681,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 125,
+        "seconds": 0.003536099975463003,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.3333333333333333,
+        "tokens": 32,
+        "seconds": 0.0038804999785497785,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.5,
+        "tokens": 152,
+        "seconds": 0.003239000041503459,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 176,
+        "seconds": 0.0037213999894447625,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 0.2,
+        "tokens": 268,
+        "seconds": 0.003476700047031045,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 196,
+        "seconds": 0.0036202999763190746,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 171,
+        "seconds": 0.0036259000189602375,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 196,
+        "seconds": 0.003595299960579723,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 130,
+        "seconds": 0.003400099987629801,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.3333333333333333,
+        "mrr": 0.5,
+        "tokens": 152,
+        "seconds": 0.004812600032892078,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 171,
+        "seconds": 0.0035638000117614865,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 196,
+        "seconds": 0.003737799997907132,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 167,
+        "seconds": 0.003848099964670837,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 151,
+        "seconds": 0.004514999978709966,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 167,
+        "seconds": 0.0047774999984540045,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.11764705882352941,
+        "mrr": 0.3333333333333333,
+        "tokens": 177,
+        "seconds": 0.004365200002212077,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 207,
+        "seconds": 0.005176100006792694,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 260,
+        "seconds": 0.004779799957759678,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 229,
+        "seconds": 0.004486600053496659,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 213,
+        "seconds": 0.00427299999864772,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 56,
+        "seconds": 0.004018900042865425,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 175,
+        "seconds": 0.004504300013650209,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 103,
+        "seconds": 0.004672700015362352,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 251,
+        "seconds": 0.00429519999306649,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.4,
+        "indirect_recall": 0.2,
+        "mrr": 1.0,
+        "tokens": 67,
+        "seconds": 0.004690899979323149,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 197,
+        "seconds": 0.004087899986188859,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 179,
+        "seconds": 0.004925400018692017,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 240,
+        "seconds": 0.0044003999792039394,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 0.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 209,
+        "seconds": 0.0043827000190503895,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 157,
+        "seconds": 0.004549900011625141,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 126,
+        "seconds": 0.004343200009316206,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 51,
+        "seconds": 0.004542899958323687,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": 0.0,
+        "mrr": 0.0,
+        "tokens": 175,
+        "seconds": 0.0049789000186137855,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 43,
+        "seconds": 0.004834299965295941,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 44,
+        "seconds": 0.0056918999762274325,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 149,
+        "seconds": 0.004355300043243915,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 1.0,
+        "file_recall": 1.0,
+        "precision": 0.2,
+        "indirect_recall": null,
+        "mrr": 1.0,
+        "tokens": 87,
+        "seconds": 0.004086799977812916,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 40,
+        "seconds": 0.004175999958533794,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 266,
+        "seconds": 0.003809400019235909,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 34,
+        "seconds": 0.00456630002008751,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 98,
+        "seconds": 0.0040475999703630805,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 56,
+        "seconds": 0.0043409999925643206,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 60,
+        "seconds": 0.004128600005060434,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 61,
+        "seconds": 0.0047966999700292945,
+        "n_hits": 5
+      },
+      {
+        "unit_recall": 0.0,
+        "file_recall": 1.0,
+        "precision": 0.0,
+        "indirect_recall": null,
+        "mrr": 0.0,
+        "tokens": 48,
+        "seconds": 0.00977409997722134,
+        "n_hits": 5
+      }
+    ]
+  },
+  "rev": "feat/callgraph-advanced@b66681d",
+  "root": "J:\\Playgroung\\URAG"
+}

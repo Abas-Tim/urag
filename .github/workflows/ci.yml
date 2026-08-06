@@ -3,19 +3,61 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".python-version"
+      - "pyproject.toml"
+      - "skills/**"
+      - "src/**"
+      - "tests/**"
+      - "uv.lock"
   pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".python-version"
+      - "pyproject.toml"
+      - "skills/**"
+      - "src/**"
+      - "tests/**"
+      - "uv.lock"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.12", "3.13"]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     # only uv-managed interpreters: their CPython builds ship with loadable
     # SQLite extension support (sqlite-vec needs it); the macOS runner's
     # preinstalled framework build omits it.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: uv sync --group dev
+      - name: Test
+        run: uv run pytest -q
+      - name: CLI smoke
+        run: uv run urag --version
+
+  cross-platform:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
     env:
       UV_PYTHON_PREFERENCE: only-managed
     steps:

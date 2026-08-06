@@ -85,14 +85,15 @@ def init(
     if not cfg.urag_dir.exists():
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
     gi = root / ".gitignore"
+    entry = f"{UURAG_DIR}/"
     if gi.exists():
         content = gi.read_text(encoding="utf-8", errors="replace")
-        if UURAG_DIR not in content.splitlines():
-            gi.write_text(content.rstrip() + f"\n{UURAG_DIR}/\n", encoding="utf-8")
-            console.print(f"[green]added .urag/ to {gi}[/green]")
+        if entry not in content.splitlines():
+            gi.write_text(content.rstrip() + f"\n{entry}\n", encoding="utf-8")
+            console.print(f"[green]added {entry} to {gi}[/green]")
     else:
-        gi.write_text(f"{UURAG_DIR}/\n", encoding="utf-8")
-        console.print(f"[green]created {gi} with .urag/ entry[/green]")
+        gi.write_text(f"{entry}\n", encoding="utf-8")
+        console.print(f"[green]created {gi} with {entry} entry[/green]")
     db = Database(cfg.db_path, cfg.embedding.dimension)
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")
@@ -197,6 +198,8 @@ def eval_cmd(
     root: Path = typer.Option(".", help="project root"),
     questions: Optional[Path] = typer.Option(None, "--questions", help="JSONL of {query, gold_file?, gold_unit_ids?}"),
     autogen: Optional[int] = typer.Option(None, "--autogen", help="auto-generate N definition + N call questions with provable gold"),
+    transitive: Optional[int] = typer.Option(None, "--transitive", help="add N multi-hop (callers-of-callers) questions with provable gold"),
+    alias: Optional[int] = typer.Option(None, "--alias", help="add N import-alias resolution questions with provable gold"),
     top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
     systems: Optional[str] = typer.Option(None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"),
     judge_url: Optional[str] = typer.Option(None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"),
@@ -213,7 +216,9 @@ def eval_cmd(
         RgBaseline,
         SystemRun,
         aggregate,
+        autogen_alias_questions,
         autogen_questions,
+        autogen_transitive_questions,
         judge_results,
         load_questions,
         resolve_question,
@@ -230,6 +235,10 @@ def eval_cmd(
             qs = autogen_questions(db, autogen)
         else:
             qs = autogen_questions(db, 10)
+        if transitive:
+            qs += autogen_transitive_questions(db, transitive)
+        if alias:
+            qs += autogen_alias_questions(db, cfg.project_root, alias)
         qs = [resolve_question(db, q) for q in qs]
 
         chosen = (systems or "urag-hybrid,urag-lexical,rg,chunk").split(",")
@@ -266,6 +275,23 @@ def eval_cmd(
                 runs["rg"] = rg.search(q.query, top_k, db)
             if "chunk" in chosen:
                 runs["chunk"] = chunk.search(q.query, top_k, db)
+            if q.target and ("urag-callers" in chosen or "urag-transitive" in chosen):
+                if "urag-callers" in chosen:
+                    t = time.perf_counter()
+                    r = retriever.search_callers(q.target, limit=top_k)
+                    run = urag_run(r)
+                    run.seconds = time.perf_counter() - t
+                    runs["urag-callers"] = run
+                if "urag-transitive" in chosen:
+                    t = time.perf_counter()
+                    st = getattr(retriever, "search_transitive", None)
+                    if st is None:
+                        r = retriever.search_callers(q.target, limit=top_k)
+                    else:
+                        r = st(q.target, depth=q.depth or 3, limit=top_k)
+                    run = urag_run(r)
+                    run.seconds = time.perf_counter() - t
+                    runs["urag-transitive"] = run
             if "oracle" in chosen:
                 runs["oracle"] = oracle.search(q, db)
             for name, run in runs.items():
@@ -323,14 +349,19 @@ def callers(
     name: str = typer.Argument(..., help="symbol name to find callers of"),
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
+    depth: int = typer.Option(1, "--depth", min=1, help="hop depth; 1 = direct callers, >1 = callers-of-callers"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
-    """Who calls a symbol? Exact call-graph lookup."""
+    """Who calls a symbol? Exact call-graph lookup (--depth for multi-hop)."""
     from .git_aware import Git
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).search_callers(name, limit=top_k or 20)
+        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        if depth > 1:
+            result = retriever.search_transitive(name, depth=depth, limit=top_k or 20)
+        else:
+            result = retriever.search_callers(name, limit=top_k or 20)
         if json_out:
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return
@@ -343,6 +374,10 @@ def callers(
                 f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
             )
             console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
+            if r.hop > 1:
+                console.print(f"  [cyan]hop {r.hop}[/cyan]")
+            if r.resolved_target:
+                console.print(f"  [cyan]via alias -> {r.resolved_target}[/cyan]")
     finally:
         db.close()
 

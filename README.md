@@ -174,11 +174,24 @@ urag eval --root . --autogen 10 --json --report eval.json
 
 Systems compared per question: `urag-hybrid`, `urag-lexical`, `rg` (grep
 baseline), `chunk` (structure-free fixed-size chunk embeddings), and optional
-`oracle` (whole gold files). Metrics: **recall@k, MRR, tokens/retrieval,
-p50/p95 latency**. Definition and call questions get provable gold from the
-index itself (the unit's file / the actual `call_edges`), so evaluation works
-without hand labeling; doc/conceptual questions need a hand-written
-`--questions` file.
+`oracle` (whole gold files). Metrics: **recall@k, precision@k, MRR,
+tokens/retrieval, p50/p95 latency**. Definition and call questions get
+provable gold from the index itself (the unit's file / the actual
+`call_edges`), so evaluation works without hand labeling; doc/conceptual
+questions need a hand-written `--questions` file.
+
+Call-graph suites (provable gold, deterministic — seeded shuffle):
+
+```bash
+# multi-hop: gold = ALL transitive callers (hops 1..depth), measured via indirect_recall
+urag eval --root . --transitive 25 --systems urag-callers,urag-transitive
+
+# import-alias: gold = units whose aliased call sites resolve to a fully-qualified target
+urag eval --root . --alias 25 --systems urag-callers
+
+# one-shot benchmark runner (fixture + optional real repo, fresh index per run)
+uv run python benchmarks/run_bench.py --self
+```
 
 ## Call graph (impact analysis)
 
@@ -191,6 +204,7 @@ instead of text similarity:
 ```bash
 urag search "what calls index_all"     # -> mode=calls, real callers + line numbers
 urag callers fit_evidence              # dedicated command
+urag callers stop --depth 3            # multi-hop: callers-of-callers, each tagged with its hop
 ```
 
 ```json
@@ -204,6 +218,27 @@ Matching normalizes the last segment (`self.validate`, `os.path.exists`,
 included (who instantiates X is an impact question). Alias resolution is
 approximate by design — dynamic/reflective calls are invisible to static
 analysis.
+
+### Multi-hop traversal
+
+`urag callers NAME --depth N` walks callers-of-callers up to N hops (BFS over
+`call_edges`, cycles safe; each result carries its shortest `hop`, 1 = direct
+caller). The MCP `callers` tool takes the same `depth` argument. Exact-match
+walking means indirect edges through instance dispatch may be missed — call
+sites whose last segment is recorded are found, chains that are only reachable
+via `self.`/`this.` method resolution are not (the raw `callee_full` is used).
+
+### Import-alias resolution
+
+Fully-qualified queries are resolved through per-file import bindings captured
+at index time (`import_aliases` table): `import os.path as op` + `op.exists()`
+now answers "who calls os.path.exists". Supported forms: python
+(`import x as y`, `from m import n as y`, bare `from m import n`), typescript
+(namespace, named-with-as, default, bare named), go (`import a "pkg/path"`),
+rust (`use path as alias`), c# (`using A = B`). Alias bindings shadowed by a
+local symbol in the same file are ignored; hits resolved through an alias carry
+`resolved_to`. Existing indexes need a re-index (`urag index`) once to populate
+the alias table.
 
 ## MCP server (agent harnesses)
 
@@ -280,7 +315,7 @@ cp -r skills/urag ~/.claude/skills/urag
 - [x] More languages (go, rust, java, c, c++, c#)
 - [x] Adaptive query-classifier → per-query token budgets
 - [x] Call-graph pass — impact queries answered from real call edges
-- [ ] Multi-hop traversal (callers-of-callers) on demand
-- [ ] Import-alias resolution for fully-qualified callee chains
+- [x] Multi-hop traversal (callers-of-callers) on demand
+- [x] Import-alias resolution for fully-qualified callee chains
 - [ ] More languages (kotlin, swift, ruby, php, zig)
 - [ ] Train the query router from production traces

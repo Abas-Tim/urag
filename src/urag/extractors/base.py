@@ -20,6 +20,10 @@ class Extractor(ABC):
         """Collect call sites. Default: no calls known."""
         return []
 
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """Import bindings (alias, fully-qualified target). Default: none."""
+        return []
+
 
 def split_callee(full: str) -> str:
     """Last segment of a dotted / :: / / chain."""
@@ -27,6 +31,18 @@ def split_callee(full: str) -> str:
         if sep in full:
             return full.rsplit(sep, 1)[-1]
     return full
+
+
+def valid_aliases(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Keep well-formed (alias, target) bindings; duplicates resolve to the
+    first occurrence (file-local shadowing rules stay in db.callers)."""
+    import re
+
+    out: dict[str, str] = {}
+    for alias, target in pairs:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias) and target and alias not in out:
+            out[alias] = target
+    return list(out.items())
 
 
 def walk_calls(node, source: str, call_types: set[str], out: list[CallSite], fn_field: str = "function") -> None:

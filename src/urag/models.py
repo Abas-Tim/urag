@@ -96,6 +96,8 @@ class RetrievedUnit:
     stale: bool = False
     caller_of: str = ""
     call_line: int = 0
+    hop: int = 0
+    resolved_target: str = ""
 
     def to_dict(self, include_evidence: bool = False) -> dict:
         u = self.unit
@@ -114,10 +116,13 @@ class RetrievedUnit:
             "score": round(self.score, 4),
             "commit": self.commit,
             "stale": self.stale,
+            "hop": self.hop,
         }
         if self.caller_of:
             d["calls"] = self.caller_of
             d["call_line"] = self.call_line
+        if self.resolved_target:
+            d["resolved_to"] = self.resolved_target
         if include_evidence:
             d["evidence"] = self.evidence
         return d

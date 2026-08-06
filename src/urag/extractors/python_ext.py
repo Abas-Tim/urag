@@ -8,7 +8,7 @@ from tree_sitter import Language, Node, Parser
 import tree_sitter_python as tsp
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, walk_calls
+from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, valid_aliases, walk_calls
 
 _LANG = Language(tsp.language())
 _PARSER: Parser | None = None
@@ -77,6 +77,52 @@ class PythonExtractor(Extractor):
         out: list[CallSite] = []
         walk_calls(tree.root_node, source, {"call"}, out)
         return out
+
+    def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
+        """(alias, fully-qualified target) for `import x as y`, `from m import n`
+        and `from m import n as y`."""
+        tree = _parser().parse(source.encode("utf-8"))
+        out: list[tuple[str, str]] = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "import_statement":
+                for child in cur.named_children:
+                    if child.type == "aliased_import":
+                        name = child.child_by_field_name("name")
+                        alias = child.child_by_field_name("alias")
+                        if name is not None and alias is not None:
+                            out.append(
+                                (
+                                    source[alias.start_byte : alias.end_byte],
+                                    source[name.start_byte : name.end_byte],
+                                )
+                            )
+            elif cur.type == "import_from_statement":
+                mod = cur.child_by_field_name("module_name")
+                mod_name = source[mod.start_byte : mod.end_byte] if mod else ""
+                for child in cur.named_children:
+                    if child == mod:
+                        continue
+                    if child.type == "aliased_import":
+                        name = child.child_by_field_name("name")
+                        alias = child.child_by_field_name("alias")
+                        if name is not None and alias is not None:
+                            out.append(
+                                (
+                                    source[alias.start_byte : alias.end_byte],
+                                    f"{mod_name}.{source[name.start_byte : name.end_byte]}",
+                                )
+                            )
+                    elif child.type == "dotted_name":
+                        out.append(
+                            (
+                                source[child.start_byte : child.end_byte],
+                                f"{mod_name}.{source[child.start_byte : child.end_byte]}",
+                            )
+                        )
+            stack.extend(reversed(cur.named_children))
+        return valid_aliases(out)
 
     def _walk(
         self,

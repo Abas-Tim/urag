@@ -131,7 +131,11 @@ class Retriever:
                 hits = self.db.callers(target, limit=max(k * 3, 10))
                 if hits:
                     results = [
-                        RetrievedUnit(h["unit"], h["path"], score=1.0, caller_of=h["callee_full"] or target, call_line=h["line"])
+                        RetrievedUnit(
+                            h["unit"], h["path"], score=1.0,
+                            caller_of=h["callee_full"] or target, call_line=h["line"],
+                            resolved_target=h.get("resolved_target", ""),
+                        )
                         for h in hits[:k]
                     ]
                     self._enrich(results)
@@ -227,11 +231,29 @@ class Retriever:
         """Direct call-graph lookup: who calls `name`."""
         hits = self.db.callers(name, limit=limit)
         results = [
-            RetrievedUnit(h["unit"], h["path"], score=1.0, caller_of=h["callee_full"] or name, call_line=h["line"])
+            RetrievedUnit(
+                h["unit"], h["path"], score=1.0,
+                caller_of=h["callee_full"] or name, call_line=h["line"],
+                resolved_target=h.get("resolved_target", ""),
+            )
             for h in hits
         ]
         self._enrich(results)
         return SearchResult(results, "calls", f"callers of {name}", "impact", BUDGETS["impact"]["tokens"])
+
+    def search_transitive(self, name: str, depth: int = 3, limit: int = 20) -> SearchResult:
+        """Multi-hop call-graph lookup: callers-of-callers up to `depth` hops."""
+        hits = self.db.transitive_callers(name, max_depth=depth, limit=limit)
+        results = [
+            RetrievedUnit(
+                h["unit"], h["path"], score=1.0,
+                caller_of=h["callee_full"] or name, call_line=h["line"],
+                hop=h.get("hop", 0),
+            )
+            for h in hits
+        ]
+        self._enrich(results)
+        return SearchResult(results, "calls", f"transitive callers of {name} (depth {depth})", "impact", BUDGETS["impact"]["tokens"])
 
     def get(self, unit_id: int) -> dict | None:
         ev = self.db.load_evidence(unit_id)

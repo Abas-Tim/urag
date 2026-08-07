@@ -197,6 +197,11 @@ class OracleBaseline:
     def search(self, question: Question, db: Database) -> SystemRun:
         hits: list[Hit] = []
         total = 0
+        if question.gold_file:
+            p = self.root / question.gold_file
+            if p.exists():
+                txt = p.read_text(encoding="utf-8", errors="replace")
+                return SystemRun("oracle", [Hit(question.gold_file, None, _tokens(txt))], 0.0, _tokens(txt))
         for gid in question.gold_unit_ids:
             got = db.unit_by_id(gid)
             if got:
@@ -206,12 +211,6 @@ class OracleBaseline:
                     span = text.get("span", "")
                     total += _tokens(span) if span else _unit_tokens(u)
                     hits.append(Hit(path, gid, _tokens(span) if span else _unit_tokens(u)))
-        if question.gold_file and not any(h.file == question.gold_file for h in hits):
-            p = self.root / question.gold_file
-            if p.exists():
-                txt = p.read_text(encoding="utf-8", errors="replace")
-                total += _tokens(txt)
-                hits.append(Hit(question.gold_file, None, _tokens(txt)))
         return SystemRun("oracle", hits, 0.0, total)
 
 
@@ -485,6 +484,9 @@ def load_questions(path: Path) -> list[Question]:
                 gold_unit_ids=d.get("gold_unit_ids", []),
                 gold_file=d.get("gold_file", ""),
                 label=d.get("label", "custom"),
+                target=d.get("target", ""),
+                depth=d.get("depth", 1),
+                gold_hops={int(k): v for k, v in d.get("gold_hops", {}).items()},
             )
         )
     return out
@@ -502,7 +504,7 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     hit_files = {h.file for h in hits}
     hit_unit_ids = {h.unit_id for h in hits if h.unit_id is not None}
 
-    unit_recall = 1.0 if (gold_ids and hit_unit_ids & gold_ids) else 0.0
+    unit_recall = len(hit_unit_ids & gold_ids) / len(gold_ids) if gold_ids else 0.0
     file_recall = 1.0 if (gold_file and gold_file in hit_files) else 0.0
 
     relevant = hit_unit_ids & gold_ids if gold_ids else set()

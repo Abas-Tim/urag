@@ -15,7 +15,7 @@ import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, collapse_ws, leading_comments, split_callee, valid_aliases, walk_calls
+from .base import ByteIndexedSource, Extractor, collapse_ws, leading_comments, split_callee, valid_aliases, walk_calls
 
 _PARSERS: dict[str, Parser] = {}
 
@@ -148,6 +148,7 @@ class GoExtractor(Extractor):
     language = "go"
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser("go").parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -175,6 +176,7 @@ class GoExtractor(Extractor):
                 units.append(self._import(child, source))
 
     def collect_calls(self, source: str) -> list:
+        source = ByteIndexedSource(source)
         tree = _parser("go").parse(source.encode("utf-8"))
         out: list = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
@@ -182,6 +184,7 @@ class GoExtractor(Extractor):
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """`import alias "path"` -> (alias, dotted path)."""
+        source = ByteIndexedSource(source)
         tree = _parser("go").parse(source.encode("utf-8"))
         out: list[tuple[str, str]] = []
         stack: list[Node] = [tree.root_node]
@@ -206,7 +209,7 @@ class GoExtractor(Extractor):
         params = _field(n, "parameters") or _field(n, "result")
         qualname = f"{prefix}.{name}" if prefix else name
         return _make(n, source, lines, "", "method" if prefix else "function", name, qualname, body,
-                     concepts=_concepts(params, source))
+                     concepts=_concepts(n, source))
 
     def _type_spec(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
@@ -240,6 +243,7 @@ class RustExtractor(Extractor):
     language = "rust"
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser("rust").parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -263,6 +267,7 @@ class RustExtractor(Extractor):
                 units.append(self._import(child, source))
 
     def collect_calls(self, source: str) -> list:
+        source = ByteIndexedSource(source)
         tree = _parser("rust").parse(source.encode("utf-8"))
         out: list = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
@@ -270,6 +275,7 @@ class RustExtractor(Extractor):
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """`use path as alias;` -> (alias, path)."""
+        source = ByteIndexedSource(source)
         out: list[tuple[str, str]] = []
         tree = _parser("rust").parse(source.encode("utf-8"))
         stack: list[Node] = [tree.root_node]
@@ -291,7 +297,7 @@ class RustExtractor(Extractor):
         params = _field(n, "parameters")
         qualname = f"{prefix}::{name}" if prefix else name
         return _make(n, source, lines, "", "method" if prefix else "function", name, qualname, body,
-                     concepts=_concepts(params, source))
+                     concepts=_concepts(n, source))
 
     def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
@@ -316,6 +322,7 @@ class JavaExtractor(Extractor):
     language = "java"
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser("java").parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -333,6 +340,7 @@ class JavaExtractor(Extractor):
                 units.append(self._import(child, source))
 
     def collect_calls(self, source: str) -> list:
+        source = ByteIndexedSource(source)
         tree = _parser("java").parse(source.encode("utf-8"))
         out: list = []
         _walk_invocations(tree.root_node, source, out, {"method_invocation"})
@@ -344,7 +352,7 @@ class JavaExtractor(Extractor):
         params = _field(n, "parameters")
         qualname = f"{prefix}.{name}" if prefix else name
         return _make(n, source, lines, "", "constructor" if n.type == "constructor_declaration" else "method",
-                     name, qualname, body, concepts=_concepts(params, source))
+                     name, qualname, body, concepts=_concepts(n, source))
 
     def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
@@ -375,6 +383,7 @@ class CExtractor(Extractor):
         self.language = language
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser(self.language).parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -406,6 +415,7 @@ class CExtractor(Extractor):
                 units.append(self._import(child, source))
 
     def collect_calls(self, source: str) -> list:
+        source = ByteIndexedSource(source)
         tree = _parser(self.language).parse(source.encode("utf-8"))
         out: list = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
@@ -422,7 +432,7 @@ class CExtractor(Extractor):
         qualname = f"{prefix}{name}" if prefix else name
         unit_type = "method" if is_method else "function"
         return _make(n, source, lines, "", unit_type, name, qualname, body,
-                     concepts=_concepts(params, source) if params else "")
+                     concepts=_concepts(n, source))
 
     @staticmethod
     def _declarator_name(declarator: Node, params: Node | None, source: str) -> str:
@@ -487,6 +497,7 @@ class CSharpExtractor(Extractor):
     def extract(self, source: str, rel_path: str) -> list[Unit]:
         import tree_sitter_c_sharp as tscs
 
+        source = ByteIndexedSource(source)
         p = Parser()
         p.language = Language(tscs.language())
         tree = p.parse(source.encode("utf-8"))
@@ -498,6 +509,7 @@ class CSharpExtractor(Extractor):
     def collect_calls(self, source: str) -> list:
         import tree_sitter_c_sharp as tscs
 
+        source = ByteIndexedSource(source)
         p = Parser()
         p.language = Language(tscs.language())
         tree = p.parse(source.encode("utf-8"))
@@ -533,6 +545,7 @@ class CSharpExtractor(Extractor):
         """`using Alias = Namespace.Type;` -> (Alias, Namespace.Type)."""
         import tree_sitter_c_sharp as tscs
 
+        source = ByteIndexedSource(source)
         p = Parser()
         p.language = Language(tscs.language())
         tree = p.parse(source.encode("utf-8"))
@@ -575,7 +588,7 @@ class CSharpExtractor(Extractor):
         params = next((c for c in n.named_children if c.type == "parameter_list"), None)
         qualname = f"{prefix}{name}" if prefix else name
         return _make(n, source, lines, "", "constructor" if n.type == "constructor_declaration" else "method",
-                     name, qualname, body, concepts=_concepts(params, source) if params else "")
+                     name, qualname, body, concepts=_concepts(n, source))
 
     @staticmethod
     def _method_name(n: Node, source: str) -> str:

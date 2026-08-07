@@ -7,7 +7,7 @@ import tree_sitter_typescript as tsts
 import tree_sitter_javascript as tsjs
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, leading_comments, valid_aliases, walk_calls
+from .base import ByteIndexedSource, Extractor, MAX_SUMMARY_CHARS, collapse_ws, leading_comments, valid_aliases, walk_calls
 
 _FUNCTION_TYPES = {
     "function_declaration",
@@ -63,6 +63,7 @@ class TsExtractor(Extractor):
         self.language = language
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser(self.language).parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -72,6 +73,7 @@ class TsExtractor(Extractor):
     def collect_calls(self, source: str) -> list:
         from ..models import CallSite
 
+        source = ByteIndexedSource(source)
         tree = _parser(self.language).parse(source.encode("utf-8"))
         out: list[CallSite] = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
@@ -80,6 +82,7 @@ class TsExtractor(Extractor):
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """(alias, target): `import * as ns`, `import {A as B}`, `import D`,
         and bare named imports `import {A}`."""
+        source = ByteIndexedSource(source)
         tree = _parser(self.language).parse(source.encode("utf-8"))
         out: list[tuple[str, str]] = []
         stack: list[Node] = [tree.root_node]
@@ -156,7 +159,7 @@ class TsExtractor(Extractor):
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         doc = leading_comments(lines, sl, marker="//") or leading_comments(lines, sl, marker="/*")
         params = n.child_by_field_name("parameters")
-        concepts = self._identifiers(params, source, 6) if params else []
+        concepts = self._identifiers(n, source, 12)
         qualname = f"{prefix}.{name}" if prefix else name
         return Unit(
             file_id=0,

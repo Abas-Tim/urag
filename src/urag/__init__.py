@@ -1,3 +1,3 @@
 """urag: universal repository agent graph."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

@@ -9,6 +9,13 @@ from ..models import CallSite, Unit
 MAX_SUMMARY_CHARS = 220
 
 
+class ByteIndexedSource(str):
+    def __getitem__(self, key):
+        if isinstance(key, slice) and key.step in (None, 1):
+            return bytes(self.encode("utf-8")[key]).decode("utf-8", errors="replace")
+        return super().__getitem__(key)
+
+
 class Extractor(ABC):
     language: str = ""
 

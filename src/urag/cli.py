@@ -98,7 +98,8 @@ def init(
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")
     if full:
-        indexer = Indexer(cfg, db, _embedder(cfg), progress=lambda m: console.print(m))
+        embedder = NoopEmbedder() if no_embed else _embedder(cfg)
+        indexer = Indexer(cfg, db, embedder, progress=lambda m: console.print(m))
         indexer.index_all()
     db.close()
 

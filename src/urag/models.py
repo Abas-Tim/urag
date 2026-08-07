@@ -52,7 +52,13 @@ class Unit:
     @property
     def retrieval_key(self) -> str:
         """The compact text that gets embedded and lexically indexed."""
-        parts = [self.qualname or self.name, self.signature, self.summary, self.concepts]
+        parts = [
+            self.qualname or self.name,
+            self.signature,
+            self.summary,
+            self.concepts,
+            self.relationships,
+        ]
         return "\n".join(p for p in parts if p)
 
     @property

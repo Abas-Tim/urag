@@ -24,6 +24,7 @@ class _Handler(FileSystemEventHandler):
         self.log = log or print
         self._pending: set[str] = set()
         self._lock = threading.Lock()
+        self._flush_lock = threading.Lock()
         self._timer: threading.Timer | None = None
 
     def _ignore(self, path: str) -> bool:
@@ -44,18 +45,19 @@ class _Handler(FileSystemEventHandler):
             self._timer.start()
 
     def _flush(self) -> None:
-        with self._lock:
-            paths = list(self._pending)
-            self._pending.clear()
-            self._timer = None
-        if not paths:
-            return
-        try:
-            stats = self.indexer.index_paths(Path(p) for p in paths)
-            if stats["changed"] or stats["deleted"]:
-                self.log(f"re-indexed {stats['changed']} changed, {stats['deleted']} deleted")
-        except Exception as exc:  # keep the daemon alive
-            self.log(f"index error: {exc}")
+        with self._flush_lock:
+            with self._lock:
+                paths = list(self._pending)
+                self._pending.clear()
+                self._timer = None
+            if not paths:
+                return
+            try:
+                stats = self.indexer.index_paths(Path(p) for p in paths)
+                if stats["changed"] or stats["deleted"]:
+                    self.log(f"re-indexed {stats['changed']} changed, {stats['deleted']} deleted")
+            except Exception as exc:  # keep the daemon alive
+                self.log(f"index error: {exc}")
 
 
 def run_watch(cfg: Config, indexer: Indexer, rescan_minutes: float = 0, log=print) -> None:

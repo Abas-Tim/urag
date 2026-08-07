@@ -42,7 +42,8 @@ DEFAULT_EXCLUDES = [
 
 SUPPORTED_LANGUAGES = {
     "python": {"ext": (".py", ".pyi"), "kind": "source"},
-    "typescript": {"ext": (".ts", ".tsx", ".mts", ".cts"), "kind": "source"},
+    "typescript": {"ext": (".ts", ".mts", ".cts"), "kind": "source"},
+    "tsx": {"ext": (".tsx",), "kind": "source"},
     "javascript": {"ext": (".js", ".jsx", ".mjs", ".cjs"), "kind": "source"},
     "go": {"ext": (".go",), "kind": "source"},
     "rust": {"ext": (".rs",), "kind": "source"},
@@ -73,6 +74,11 @@ class EmbeddingConfig:
     http_model: str = ""
     http_timeout: float = 30.0
 
+    def fingerprint(self) -> str:
+        return "|".join(
+            [self.provider, self.model, str(self.dimension), self.http_url, self.http_model]
+        )
+
 
 @dataclass
 class IndexConfig:
@@ -90,6 +96,9 @@ class RetrievalConfig:
     max_evidence_tokens: int = 1500
     dense_candidates: int = 30
     lexical_candidates: int = 30
+    max_results_per_file: int = 3
+    lexical_weight: float = 1.0
+    dense_weight: float = 1.0
 
 
 @dataclass
@@ -128,11 +137,17 @@ class Config:
             f"exclude = {self.index.exclude!r}",
             f"include = {self.index.include!r}",
             f"ignore_gitignore = {str(self.index.ignore_gitignore).lower()}",
+            f"max_file_bytes = {self.index.max_file_bytes}",
             "",
             "[retrieval]",
             f"default_top_k = {self.retrieval.default_top_k}",
             f"rrf_k = {self.retrieval.rrf_k}",
             f"max_evidence_tokens = {self.retrieval.max_evidence_tokens}",
+            f"dense_candidates = {self.retrieval.dense_candidates}",
+            f"lexical_candidates = {self.retrieval.lexical_candidates}",
+            f"max_results_per_file = {self.retrieval.max_results_per_file}",
+            f"lexical_weight = {self.retrieval.lexical_weight}",
+            f"dense_weight = {self.retrieval.dense_weight}",
             "",
         ]
         self.config_path.write_text("\n".join(lines), encoding="utf-8")
@@ -156,7 +171,10 @@ def _parse_toml(path: Path, cfg: Config) -> None:
             if k in idx:
                 setattr(cfg.index, k, idx[k])
     if ret:
-        for k in ("default_top_k", "rrf_k", "max_evidence_tokens", "dense_candidates", "lexical_candidates"):
+        for k in (
+            "default_top_k", "rrf_k", "max_evidence_tokens", "dense_candidates",
+            "lexical_candidates", "max_results_per_file", "lexical_weight", "dense_weight",
+        ):
             if k in ret:
                 setattr(cfg.retrieval, k, ret[k])
 

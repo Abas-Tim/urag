@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,10 @@ class Indexer:
         self._specs = self._build_specs()
         self.git = Git(self._root)
         self._head = self.git.head()
+        fingerprint = self.cfg.embedding.fingerprint()
+        if self.db.get_meta("embedding_fingerprint") != fingerprint:
+            self.db.clear_embeddings()
+            self.db.set_meta("embedding_fingerprint", fingerprint)
 
     # ---------- discovery ----------
 
@@ -75,7 +80,7 @@ class Indexer:
             if result is None:
                 continue
             lang, kind = result
-            if lang not in langs:
+            if lang not in langs and not (lang == "tsx" and "typescript" in langs):
                 continue
             try:
                 if p.stat().st_size > self.cfg.index.max_file_bytes:
@@ -89,29 +94,23 @@ class Indexer:
 
     def index_all(self) -> dict:
         start = time.monotonic()
+        self._head = self.git.head(refresh=True)
         files = self.discover()
         known = self.db.known_paths()
         current = {f.relative_to(self._root).as_posix() for f in files}
         deleted = known - current
         if self._head:
-            git_changed, git_deleted = self.git.changed_paths()
+            _, git_deleted = self.git.changed_paths()
             if git_deleted:
                 deleted |= {p for p in git_deleted if p in known}
         if deleted:
             self.db.delete_files(sorted(deleted))
             self.progress(f"removed {len(deleted)} deleted file(s)")
         changed = [f for f in files if self._needs_reindex(f)]
-        if self._head:
-            git_changed, _ = self.git.changed_paths()
-            changed = [
-                f for f in files
-                if self._needs_reindex(f) or f.relative_to(self._root).as_posix() in git_changed
-            ]
-        new = [f for f in files if f.relative_to(self._root).as_posix() not in known]
         for p in changed:
             self._index_file(p)
-        if changed or new:
-            self._embed_missing()
+        self._resolve_call_edges()
+        self._embed_missing()
         if self._head:
             self.db.set_meta("last_commit", self._head)
         self.db.set_meta("last_indexed_at", datetime.now(timezone.utc).isoformat())
@@ -124,6 +123,7 @@ class Indexer:
 
     def index_paths(self, paths: Iterable[Path]) -> dict:
         """Incremental re-index of specific paths (watcher)."""
+        self._head = self.git.head(refresh=True)
         changed: list[Path] = []
         deleted: list[str] = []
         for p in paths:
@@ -141,7 +141,9 @@ class Indexer:
             if result is None:
                 continue
             lang, kind = result
-            if lang not in self.cfg.index.languages:
+            if lang not in self.cfg.index.languages and not (
+                lang == "tsx" and "typescript" in self.cfg.index.languages
+            ):
                 continue
             if self._is_excluded(rel):
                 continue
@@ -151,11 +153,11 @@ class Indexer:
             self.db.delete_files(deleted)
         for p in changed:
             self._index_file(p)
-        if changed:
-            self._embed_missing()
-            if self._head:
-                self.db.set_meta("last_commit", self._head)
-            self.db.set_meta("last_indexed_at", datetime.now(timezone.utc).isoformat())
+        self._resolve_call_edges()
+        self._embed_missing()
+        if self._head:
+            self.db.set_meta("last_commit", self._head)
+        self.db.set_meta("last_indexed_at", datetime.now(timezone.utc).isoformat())
         return {"changed": len(changed), "deleted": len(deleted)}
 
     def _needs_reindex(self, p: Path) -> bool:
@@ -163,10 +165,19 @@ class Indexer:
             st = p.stat()
         except OSError:
             return False
-        row = self.db.conn.execute("SELECT size, mtime FROM files WHERE path = ?", (p.relative_to(self._root).as_posix(),)).fetchone()
+        row = self.db.conn.execute(
+            "SELECT size, mtime, sha256 FROM files WHERE path = ?",
+            (p.relative_to(self._root).as_posix(),),
+        ).fetchone()
         if row is None:
             return True
-        return row["size"] != st.st_size or abs(row["mtime"] - st.st_mtime) > 1e-6
+        if row["size"] != st.st_size or abs(row["mtime"] - st.st_mtime) > 1e-6:
+            return True
+        try:
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            return False
+        return digest != row["sha256"]
 
     def _index_file(self, p: Path) -> None:
         rel = p.relative_to(self._root).as_posix()
@@ -192,15 +203,19 @@ class Indexer:
             commit=self._head or "",
             indexed_at=datetime.now(timezone.utc).isoformat(),
         )
-        file_id = self.db.upsert_file(f)
-        self.db.replace_units(file_id, units)
-        if extractor and units:
-            calls = extractor.collect_calls(text)
-            edges = self._map_calls(units, calls)
-            self.db.replace_call_edges(file_id, edges)
-            aliases = extractor.collect_import_aliases(text)
-            if aliases:
-                self.db.replace_import_aliases(file_id, aliases)
+        try:
+            file_id = self.db.upsert_file(f, commit=False)
+            self.db.replace_units(file_id, units, commit=False)
+            if extractor:
+                calls = extractor.collect_calls(text)
+                edges = self._map_calls(units, calls)
+                self.db.replace_call_edges(file_id, edges, commit=False)
+                aliases = extractor.collect_import_aliases(text)
+                self.db.replace_import_aliases(file_id, aliases, commit=False)
+            self.db.conn.commit()
+        except Exception:
+            self.db.conn.rollback()
+            raise
         self.progress(f"  {rel}: {len(units)} units")
 
     # ---------- embeddings ----------
@@ -217,19 +232,43 @@ class Indexer:
         return [Database._row_to_unit(r) for r in rows]
 
     def _embed_missing(self) -> int:
+        if self.embedder.dimension <= 0:
+            return 0
         units = self._units_missing_embeddings()
         if not units:
             return 0
         lang_rows = dict(
             self.db.conn.execute("SELECT id, language FROM files").fetchall()
         )
+        path_rows = dict(self.db.conn.execute("SELECT id, path FROM files").fetchall())
+        parent_rows = dict(
+            self.db.conn.execute("SELECT id, qualname FROM units WHERE qualname != ''").fetchall()
+        )
         n = 0
         for i in range(0, len(units), BATCH):
             batch = units[i : i + BATCH]
-            texts = [u.retrieval_key for u in batch]
+            texts = [
+                "\n".join(
+                    part
+                    for part in (
+                        f"file: {path_rows.get(u.file_id, '')}",
+                        f"language: {lang_rows.get(u.file_id, '')}",
+                        f"parent: {parent_rows.get(u.parent_id, '')}" if u.parent_id else "",
+                        u.retrieval_key,
+                    )
+                    if part
+                )
+                for u in batch
+            ]
             vecs = self.embedder.embed_passages(texts)
+            if len(vecs) != len(batch):
+                raise RuntimeError(
+                    f"embedding provider returned {len(vecs)} vectors for {len(batch)} units"
+                )
             rows = []
             for u, v in zip(batch, vecs):
+                if len(v) != self.embedder.dimension or not all(math.isfinite(x) for x in v):
+                    raise RuntimeError(f"invalid embedding for unit {u.id}")
                 rows.append((u.id, lang_rows.get(u.file_id, ""), u.kind, v))
             self.db.store_embeddings(rows)
             n += len(batch)
@@ -252,9 +291,72 @@ class Indexer:
             idx = bisect.bisect_right(starts, c.byte_start) - 1
             if idx >= 0:
                 caller = funcs[idx]
-                if caller.byte_start <= c.byte_start <= caller.byte_end:
+                if caller.byte_start <= c.byte_start < caller.byte_end:
                     edges.append((caller.id, c.callee, c.callee_full, c.line))
         return edges
+
+    def _resolve_call_edges(self) -> None:
+        rows = self.db.conn.execute(
+            """
+            SELECT u.id, u.file_id, u.name, u.qualname, f.path
+            FROM units u JOIN files f ON f.id = u.file_id
+            WHERE u.kind = 'symbol' AND u.unit_type != 'import'
+            """
+        ).fetchall()
+        by_file: dict[int, list] = {}
+        by_name: dict[str, list] = {}
+        by_qualname: dict[str, list] = {}
+        for row in rows:
+            by_file.setdefault(row["file_id"], []).append(row)
+            by_name.setdefault(row["name"], []).append(row)
+            by_qualname.setdefault(row["qualname"], []).append(row)
+        aliases: dict[int, dict[str, str]] = {}
+        for row in self.db.conn.execute("SELECT file_id, alias, target FROM import_aliases"):
+            aliases.setdefault(row["file_id"], {})[row["alias"]] = row["target"]
+
+        def module_name(path: str) -> str:
+            return path.rsplit(".", 1)[0].replace("/", ".")
+
+        def resolve(file_id: int, callee: str, full: str) -> int | None:
+            local = by_file.get(file_id, [])
+            candidates = [r for r in local if r["name"] == callee or r["qualname"] == full]
+            if len(candidates) == 1:
+                return candidates[0]["id"]
+            binding = aliases.get(file_id, {})
+            target = ""
+            for alias, imported in binding.items():
+                if full == alias:
+                    target = imported
+                    break
+                if full.startswith(alias + "."):
+                    target = imported + full[len(alias):]
+                    break
+            if target:
+                qualified = by_qualname.get(target, [])
+                if len(qualified) == 1:
+                    return qualified[0]["id"]
+                parts = target.rsplit(".", 1)
+                if len(parts) == 2:
+                    module, symbol = parts
+                    qualified = [
+                        r for r in by_name.get(symbol, []) if module_name(r["path"]) == module
+                    ]
+                    if len(qualified) == 1:
+                        return qualified[0]["id"]
+            global_matches = by_name.get(callee, [])
+            if len(global_matches) == 1:
+                return global_matches[0]["id"]
+            return None
+
+        for edge in self.db.conn.execute(
+            "SELECT rowid, file_id, callee, callee_full FROM call_edges"
+        ).fetchall():
+            target_id = resolve(edge["file_id"], edge["callee"], edge["callee_full"])
+            self.db.conn.execute(
+                "UPDATE call_edges SET callee_unit_id = ? WHERE rowid = ?",
+                (target_id, edge["rowid"]),
+            )
+        self.db.conn.commit()
 
     # ---------- queries ----------
 

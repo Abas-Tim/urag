@@ -7,6 +7,7 @@ file mtimes decide what needs re-extraction.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS units (
   summary TEXT NOT NULL DEFAULT '',
   concepts TEXT NOT NULL DEFAULT '',
   relationships TEXT NOT NULL DEFAULT '',
+  file_path TEXT NOT NULL DEFAULT '',
   start_line INTEGER NOT NULL DEFAULT 0,
   end_line INTEGER NOT NULL DEFAULT 0,
   start_col INTEGER NOT NULL DEFAULT 0,
@@ -54,7 +56,8 @@ CREATE TABLE IF NOT EXISTS call_edges (
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
   callee TEXT NOT NULL,
   callee_full TEXT NOT NULL DEFAULT '',
-  line INTEGER NOT NULL
+  line INTEGER NOT NULL,
+  callee_unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
 CREATE INDEX IF NOT EXISTS idx_call_edges_caller ON call_edges(caller_unit_id);
@@ -68,21 +71,21 @@ CREATE TABLE IF NOT EXISTS import_aliases (
 
 FTS_TRIGGERS = """
 CREATE TRIGGER IF NOT EXISTS units_ai AFTER INSERT ON units BEGIN
-  INSERT INTO fts_units(rowid, name, qualname, signature, summary, concepts, unit_type, file_path)
-  VALUES (new.id, new.name, new.qualname, new.signature, new.summary, new.concepts, new.unit_type,
+  INSERT INTO fts_units(rowid, name, qualname, signature, summary, concepts, relationships, unit_type, file_path)
+  VALUES (new.id, new.name, new.qualname, new.signature, new.summary, new.concepts, new.relationships, new.unit_type,
           (SELECT path FROM files WHERE id = new.file_id));
 END;
 CREATE TRIGGER IF NOT EXISTS units_ad AFTER DELETE ON units BEGIN
-  INSERT INTO fts_units(fts_units, rowid, name, qualname, signature, summary, concepts, unit_type, file_path)
-  VALUES ('delete', old.id, old.name, old.qualname, old.signature, old.summary, old.concepts, old.unit_type,
+  INSERT INTO fts_units(fts_units, rowid, name, qualname, signature, summary, concepts, relationships, unit_type, file_path)
+  VALUES ('delete', old.id, old.name, old.qualname, old.signature, old.summary, old.concepts, old.relationships, old.unit_type,
           (SELECT path FROM files WHERE id = old.file_id));
 END;
 CREATE TRIGGER IF NOT EXISTS units_au AFTER UPDATE ON units BEGIN
-  INSERT INTO fts_units(fts_units, rowid, name, qualname, signature, summary, concepts, unit_type, file_path)
-  VALUES ('delete', old.id, old.name, old.qualname, old.signature, old.summary, old.concepts, old.unit_type,
+  INSERT INTO fts_units(fts_units, rowid, name, qualname, signature, summary, concepts, relationships, unit_type, file_path)
+  VALUES ('delete', old.id, old.name, old.qualname, old.signature, old.summary, old.concepts, old.relationships, old.unit_type,
           (SELECT path FROM files WHERE id = old.file_id));
-  INSERT INTO fts_units(rowid, name, qualname, signature, summary, concepts, unit_type, file_path)
-  VALUES (new.id, new.name, new.qualname, new.signature, new.summary, new.concepts, new.unit_type,
+  INSERT INTO fts_units(rowid, name, qualname, signature, summary, concepts, relationships, unit_type, file_path)
+  VALUES (new.id, new.name, new.qualname, new.signature, new.summary, new.concepts, new.relationships, new.unit_type,
           (SELECT path FROM files WHERE id = new.file_id));
 END;
 """
@@ -116,6 +119,7 @@ class Database:
             ) from exc
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -124,12 +128,48 @@ class Database:
         cols = {r[1] for r in c.execute("PRAGMA table_info(files)")}
         if "commit" not in cols:  # migration for pre-git-aware indexes
             c.execute('ALTER TABLE files ADD COLUMN "commit" TEXT NOT NULL DEFAULT \'\'')
+        unit_cols = {r[1] for r in c.execute("PRAGMA table_info(units)")}
+        added_unit_file_path = False
+        if "file_path" not in unit_cols:
+            c.execute("ALTER TABLE units ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")
+            c.execute(
+                "UPDATE units SET file_path = (SELECT path FROM files WHERE files.id = units.file_id)"
+            )
+            added_unit_file_path = True
+        call_edge_cols = {r[1] for r in c.execute("PRAGMA table_info(call_edges)")}
+        if "callee_unit_id" not in call_edge_cols:
+            c.execute("ALTER TABLE call_edges ADD COLUMN callee_unit_id INTEGER")
+        fts_columns = {
+            "name", "qualname", "signature", "summary", "concepts", "relationships",
+            "unit_type", "file_path",
+        }
+        fts_exists = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fts_units'"
+        ).fetchone() is not None
+        rebuild_fts = added_unit_file_path or not fts_exists
+        if fts_exists:
+            current_fts_columns = {r[1] for r in c.execute("PRAGMA table_info(fts_units)")}
+            if current_fts_columns != fts_columns:
+                c.execute("DROP TABLE fts_units")
+                rebuild_fts = True
+        vector_schema = c.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_units'"
+        ).fetchone()
+        if vector_schema:
+            match = re.search(r"FLOAT\[(\d+)\]", vector_schema[0] or "", re.IGNORECASE)
+            if match and int(match.group(1)) != self.dimension:
+                c.execute("DROP TABLE vec_units")
         c.executescript(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_units USING fts5(
-              name, qualname, signature, summary, concepts, unit_type, file_path,
+              name, qualname, signature, summary, concepts, relationships, unit_type, file_path,
               content='units', content_rowid='id',
               tokenize='unicode61 remove_diacritics 2');
         """)
+        c.executescript(
+            "DROP TRIGGER IF EXISTS units_ai;"
+            "DROP TRIGGER IF EXISTS units_ad;"
+            "DROP TRIGGER IF EXISTS units_au;"
+        )
         c.executescript(FTS_TRIGGERS)
         c.executescript(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_units USING vec0(
@@ -139,6 +179,9 @@ class Database:
               embedding FLOAT[{self.dimension}]
             );
         """)
+        c.execute("DELETE FROM vec_units WHERE unit_id NOT IN (SELECT id FROM units)")
+        if rebuild_fts:
+            c.execute("INSERT INTO fts_units(fts_units) VALUES ('rebuild')")
         c.commit()
 
     def set_meta(self, key: str, value: str) -> None:
@@ -161,7 +204,7 @@ class Database:
     def known_paths(self) -> set[str]:
         return {r[0] for r in self.conn.execute("SELECT path FROM files")}
 
-    def upsert_file(self, f: SourceFile) -> int:
+    def upsert_file(self, f: SourceFile, commit: bool = True) -> int:
         cur = self.conn.execute(
             """
             INSERT INTO files(path, kind, language, size, mtime, sha256, "commit", indexed_at)
@@ -185,38 +228,86 @@ class Database:
             },
         )
         file_id = cur.fetchone()[0]
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return file_id
 
     def delete_files(self, paths: list[str]) -> None:
         if not paths:
             return
-        self.conn.executemany("DELETE FROM files WHERE path = ?", [(p,) for p in paths])
+        for path in paths:
+            self.conn.execute(
+                "DELETE FROM vec_units WHERE unit_id IN ("
+                "SELECT id FROM units WHERE file_id = (SELECT id FROM files WHERE path = ?)"
+                ")",
+                (path,),
+            )
+            self.conn.execute("DELETE FROM files WHERE path = ?", (path,))
         self.conn.commit()
 
     # ---------- units ----------
 
-    def replace_units(self, file_id: int, units: list[Unit]) -> None:
+    def replace_units(self, file_id: int, units: list[Unit], commit: bool = True) -> None:
         """Replace all units of a file."""
+        existing = self.conn.execute(
+            "SELECT id, kind, unit_type, qualname FROM units WHERE file_id = ? ORDER BY id",
+            (file_id,),
+        ).fetchall()
+        reusable: dict[tuple[str, str, str], list[int]] = {}
+        for row in existing:
+            key = (row["kind"], row["unit_type"], row["qualname"])
+            reusable.setdefault(key, []).append(row["id"])
         self.conn.execute("DELETE FROM vec_units WHERE unit_id IN (SELECT id FROM units WHERE file_id = ?)", (file_id,))
         self.conn.execute("DELETE FROM units WHERE file_id = ?", (file_id,))
+        planned: list[tuple[Unit, int | None]] = []
         for u in units:
-            cur = self.conn.execute(
-                """
-                INSERT INTO units(file_id, kind, unit_type, name, qualname, signature,
-                                  summary, concepts, relationships, start_line, end_line,
-                                  start_col, end_col, byte_start, byte_end, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    file_id, u.kind, u.unit_type, u.name, u.qualname, u.signature,
-                    u.summary, u.concepts, u.relationships, u.start_line, u.end_line,
-                    u.start_col, u.end_col, u.byte_start, u.byte_end, u.parent_id,
-                ),
+            key = (u.kind, u.unit_type, u.qualname)
+            ids = reusable.get(key, [])
+            planned.append((u, ids.pop(0) if ids else None))
+
+        for u, stable_id in [item for item in planned if item[1] is not None] + [item for item in planned if item[1] is None]:
+            values = (
+                file_id, u.kind, u.unit_type, u.name, u.qualname, u.signature,
+                u.summary, u.concepts, u.relationships, file_id, u.start_line, u.end_line,
+                u.start_col, u.end_col, u.byte_start, u.byte_end, u.parent_id,
             )
+            if stable_id is None:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO units(file_id, kind, unit_type, name, qualname, signature,
+                                      summary, concepts, relationships, file_path, start_line, end_line,
+                                      start_col, end_col, byte_start, byte_end, parent_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT path FROM files WHERE id = ?), ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+            else:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO units(id, file_id, kind, unit_type, name, qualname, signature,
+                                      summary, concepts, relationships, file_path, start_line, end_line,
+                                      start_col, end_col, byte_start, byte_end, parent_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT path FROM files WHERE id = ?), ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (stable_id, *values),
+                )
             u.id = cur.lastrowid
             u.file_id = file_id
-        self.conn.commit()
+        for child in units:
+            parents = [
+                parent
+                for parent in units
+                if parent.id != child.id
+                and parent.byte_start <= child.byte_start
+                and parent.byte_end >= child.byte_end
+                and (parent.byte_end - parent.byte_start) > (child.byte_end - child.byte_start)
+            ]
+            if parents:
+                parent = min(parents, key=lambda item: item.byte_end - item.byte_start)
+                child.parent_id = parent.id
+                self.conn.execute("UPDATE units SET parent_id = ? WHERE id = ?", (parent.id, child.id))
+        if commit:
+            self.conn.commit()
 
     def units_for_file(self, file_id: int) -> list[Unit]:
         rows = self.conn.execute("SELECT * FROM units WHERE file_id = ?", (file_id,)).fetchall()
@@ -249,21 +340,29 @@ class Database:
 
     # ---------- retrieval ----------
 
-    def lexical_search(self, query: str, limit: int = 30, language: str | None = None) -> list[tuple[Unit, str, float]]:
+    def lexical_search(
+        self, query: str, limit: int = 30, language: str | None = None, exact: bool = False
+    ) -> list[tuple[Unit, str, float]]:
         q = self._safe_fts(query.strip())
         if not q:
             return []
+        exact_filter = ""
+        exact_params: tuple = ()
+        if exact:
+            exact_filter = "AND (u.name = ? OR u.qualname = ? OR f.path = ?)"
+            exact_params = (query.strip(), query.strip(), query.strip())
         rows = self.conn.execute(
-            """
-            SELECT u.*, f.path, bm25(fts_units) AS score
+            f"""
+            SELECT u.*, f.path,
+                   bm25(fts_units, 10.0, 8.0, 4.0, 2.0, 1.0, 1.0, 3.0, 2.0) AS score
             FROM fts_units
             JOIN units u ON u.id = fts_units.rowid
             JOIN files f ON f.id = u.file_id
-            WHERE fts_units MATCH ? AND (? = '' OR f.language = ?)
+            WHERE fts_units MATCH ? AND (? = '' OR f.language = ?) {exact_filter}
             ORDER BY score
             LIMIT ?
             """,
-            (q, language or "", language or "", limit),
+            (q, language or "", language or "", *exact_params, limit),
         ).fetchall()
         return [(self._row_to_unit(r), r["path"], r["score"]) for r in rows]
 
@@ -276,8 +375,12 @@ class Database:
         """
         import re
 
-        terms = [t for t in re.split(r"[^A-Za-z0-9_.#]+", query) if t]
-        return " ".join(f'"{t}"' for t in terms)
+        terms = [t for t in re.findall(r"[\w.$:#/+-]+", query, flags=re.UNICODE) if t]
+        if not terms:
+            return ""
+        if len(terms) == 1:
+            return f'"{terms[0]}"'
+        return " OR ".join(f'"{term}"' for term in terms)
 
     def dense_search(
         self, embedding: list[float], limit: int = 30, language: str | None = None
@@ -304,40 +407,52 @@ class Database:
         ).fetchone()
         return list(row["v"]) if row else None
 
-    def store_embeddings(self, units: list[tuple[int, str, str, list[float]]]) -> None:
+    def store_embeddings(self, units: list[tuple[int, str, str, list[float]]], commit: bool = True) -> None:
         """Store embeddings: (unit_id, language, kind, vector) pairs."""
         for uid, lang, kind, vec in units:
             self.conn.execute(
                 "INSERT INTO vec_units(unit_id, language, kind, embedding) VALUES (?, ?, ?, ?)",
                 (uid, lang, kind, json.dumps(vec)),
             )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def delete_embedding(self, unit_id: int) -> None:
         self.conn.execute("DELETE FROM vec_units WHERE unit_id = ?", (unit_id,))
         self.conn.commit()
 
+    def clear_embeddings(self) -> None:
+        self.conn.execute("DELETE FROM vec_units")
+        self.conn.commit()
+
     # ---------- call graph ----------
 
-    def replace_call_edges(self, file_id: int, edges: list[tuple[int, str, str, int]]) -> None:
+    def replace_call_edges(
+        self, file_id: int, edges: list[tuple[int, str, str, int]], commit: bool = True
+    ) -> None:
         """Replace all call edges of a file: (caller_unit_id, callee, full, line)."""
         self.conn.execute(
             "DELETE FROM call_edges WHERE file_id = ?", (file_id,)
         )
         self.conn.executemany(
-            "INSERT INTO call_edges(caller_unit_id, file_id, callee, callee_full, line) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO call_edges(caller_unit_id, file_id, callee, callee_full, line, callee_unit_id) "
+            "VALUES (?, ?, ?, ?, ?, NULL)",
             [(cid, file_id, callee, full, line) for cid, callee, full, line in edges],
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
-    def replace_import_aliases(self, file_id: int, aliases: list[tuple[str, str]]) -> None:
+    def replace_import_aliases(
+        self, file_id: int, aliases: list[tuple[str, str]], commit: bool = True
+    ) -> None:
         """Replace a file's import bindings: (alias, fully-qualified target)."""
         self.conn.execute("DELETE FROM import_aliases WHERE file_id = ?", (file_id,))
         self.conn.executemany(
             "INSERT INTO import_aliases(file_id, alias, target) VALUES (?, ?, ?)",
             [(file_id, a, t) for a, t in aliases],
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def callers(self, name: str, limit: int = 30) -> list[dict]:
         """Units that call `name` (matches last segment or full chain).
@@ -353,17 +468,30 @@ class Database:
         import re
 
         esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
+        exact_ids = [
+            row["id"]
+            for row in self.conn.execute(
+                "SELECT id FROM units WHERE (name = ? OR qualname = ?) AND kind = 'symbol'",
+                (name, name),
+            ).fetchall()
+        ]
+        resolved_clause = ""
+        resolved_params: list = []
+        if exact_ids:
+            marks = ",".join("?" for _ in exact_ids)
+            resolved_clause = f" OR e.callee_unit_id IN ({marks})"
+            resolved_params.extend(exact_ids)
         rows = self.conn.execute(
-            """
+            f"""
             SELECT u.*, f.path, e.callee_full, e.line, '' AS resolved_target
             FROM call_edges e
             JOIN units u ON u.id = e.caller_unit_id
             JOIN files f ON f.id = e.file_id
             WHERE e.callee = ? OR e.callee_full = ? OR e.callee_full LIKE ? ESCAPE '\\'
-               OR e.callee_full LIKE ? ESCAPE '\\'
+               OR e.callee_full LIKE ? ESCAPE '\\' {resolved_clause}
             ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
             """,
-            (name, name, f"%.{esc}", f"%::{esc}"),
+            (name, name, f"%.{esc}", f"%::{esc}", *resolved_params),
         ).fetchall()
         by_unit: dict[int, dict] = {}
         for r in rows:
@@ -445,11 +573,21 @@ class Database:
         if not got:
             return None
         u, path, commit = got
+        file_row = self.conn.execute(
+            "SELECT sha256 FROM files WHERE path = ?", (path,)
+        ).fetchone()
+        indexed_sha256 = file_row["sha256"] if file_row else ""
         p = Path(path)
         if not p.is_absolute():
             p = self.db_path.parent.parent / p
         if not p.exists():
-            return {"unit_id": u.id, "error": f"file missing: {path}", "commit": commit}
+            return {
+                "unit_id": u.id,
+                "file": path,
+                "error": f"file missing: {path}",
+                "commit": commit,
+                "indexed_sha256": indexed_sha256,
+            }
         with p.open("r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         lines = text.splitlines()
@@ -460,6 +598,7 @@ class Database:
             "lines": [u.start_line, u.end_line],
             "language": p.suffix.lstrip("."),
             "commit": commit,
+            "indexed_sha256": indexed_sha256,
             "span": "\n".join(span),
         }
 

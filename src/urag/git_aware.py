@@ -35,7 +35,9 @@ class Git:
     def is_repo(self) -> bool:
         return self._run(["rev-parse", "--is-inside-work-tree"]) is not None
 
-    def head(self) -> str | None:
+    def head(self, refresh: bool = False) -> str | None:
+        if refresh:
+            self._head_checked = False
         if not self._head_checked:
             self._head_checked = True
             out = self._run(["rev-parse", "HEAD"])

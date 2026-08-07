@@ -5,6 +5,7 @@ from urag.config import load_config
 from urag.db import Database
 from urag.embed import Embedder, NoopEmbedder
 from urag.indexer import Indexer
+from urag.models import Unit
 from urag.retrieve import Retriever, fit_evidence
 
 
@@ -18,6 +19,49 @@ class _StaticEmbedder(Embedder):
 
     def embed_query(self, text):
         return [1.0, 0.0] if "auth" in text else [0.0, 1.0]
+
+
+class _RankingDb:
+    def __init__(self, lexical, dense):
+        self.lexical = lexical
+        self.dense = dense
+
+    def lexical_search(self, *args, **kwargs):
+        return self.lexical
+
+    def dense_search(self, *args, **kwargs):
+        return self.dense
+
+
+def _unit(unit_id: int, kind: str, name: str) -> Unit:
+    return Unit(
+        file_id=unit_id,
+        kind=kind,
+        unit_type="function" if kind == "symbol" else "doc_chunk",
+        name=name,
+        qualname=name,
+        id=unit_id,
+    )
+
+
+def test_hybrid_promotes_exact_symbol_matches_over_dense_noise(tmp_path: Path):
+    doc = _unit(1, "chunk", "notes")
+    target = _unit(2, "symbol", "parse")
+    noise = _unit(3, "symbol", "unrelated")
+    db = _RankingDb(
+        [(doc, "README.md", 1.0), (target, "parser.py", 2.0)],
+        [(noise, "other.py", 0.1)],
+    )
+    cfg = load_config(tmp_path)
+    retriever = Retriever(cfg, db, _StaticEmbedder())
+    retriever._stale_map = lambda paths: {path: False for path in paths}
+    retriever._enrich = lambda results, stale=None: None
+
+    result = retriever.search("where is parse defined", mode="hybrid", top_k=1)
+    conceptual = retriever.search("how does parse work", mode="hybrid", top_k=1)
+
+    assert result.results[0].unit.name == "parse"
+    assert conceptual.results[0].unit.name == "notes"
 
 
 def test_dense_and_hybrid_search_use_indexed_vectors(tmp_path: Path):

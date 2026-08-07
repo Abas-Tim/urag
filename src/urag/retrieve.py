@@ -8,6 +8,7 @@ compact packets; L2 evidence is loaded on demand.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from .db import Database
 from .embed import Embedder
 from .git_aware import Git
 from .indexer import Indexer
-from .models import RetrievedUnit
+from .models import RetrievedUnit, Unit
 from .classify import BUDGETS
 
 
@@ -54,6 +55,43 @@ def _rrf_scores(
             elif list_idx == 1:
                 entry["dense"] = rank + 1
     return fused
+
+
+def _exact_symbol_ids(
+    query: str, lexical: list[tuple[Unit, str, float]]
+) -> set[int]:
+    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_.$:]*", query)
+    identifiers: set[str] = set()
+    definition_query = bool(re.search(r"\b(where\s+is|defined|definition)\b", query, re.IGNORECASE))
+    stop_words = {
+        "a", "an", "are", "at", "defined", "definition", "for", "in", "is", "of",
+        "on", "the", "to", "was", "were", "where",
+    }
+    for token in tokens:
+        symbol_like = (
+            "_" in token
+            or "." in token
+            or ":" in token
+            or "$" in token
+            or (token[:1].isupper() and any(c.islower() for c in token[1:]))
+            or (len(token) > 1 and token.isupper())
+        )
+        if not symbol_like and not (definition_query and token.casefold() not in stop_words):
+            continue
+        identifiers.add(token.casefold())
+        identifiers.update(part.casefold() for part in re.split(r"[.:$]+", token) if part)
+
+    if not identifiers:
+        return set()
+
+    matched: set[int] = set()
+    for unit, path, _score in lexical:
+        if unit.id is None or not unit.is_symbol:
+            continue
+        values = (unit.name, unit.qualname, Path(path).name, path)
+        if any(value and value.casefold() in identifiers for value in values):
+            matched.add(unit.id)
+    return matched
 
 
 def fit_evidence(span: str, max_tokens: int) -> str:
@@ -196,6 +234,11 @@ class Retriever:
             fused = _rrf_scores(
                 lists, rc.rrf_k, weights=[rc.lexical_weight, rc.dense_weight]
             )
+            exact_ids = _exact_symbol_ids(query, lexical)
+            exact_bonus = rc.exact_symbol_weight / (rc.rrf_k + 1)
+            for uid in exact_ids:
+                if uid in fused:
+                    fused[uid]["rrf"] = float(fused[uid]["rrf"]) + exact_bonus
             ranked = sorted(fused.items(), key=lambda kv: kv[1]["rrf"], reverse=True)[: max(k * 4, 20)]
             by_id = {u.id: (u, p) for u, p, _s in lexical}
             for u, p, _s in dense:

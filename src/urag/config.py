@@ -99,6 +99,7 @@ class RetrievalConfig:
     max_results_per_file: int = 3
     lexical_weight: float = 1.0
     dense_weight: float = 1.0
+    exact_symbol_weight: float = 1.0
 
 
 @dataclass
@@ -148,6 +149,7 @@ class Config:
             f"max_results_per_file = {self.retrieval.max_results_per_file}",
             f"lexical_weight = {self.retrieval.lexical_weight}",
             f"dense_weight = {self.retrieval.dense_weight}",
+            f"exact_symbol_weight = {self.retrieval.exact_symbol_weight}",
             "",
         ]
         self.config_path.write_text("\n".join(lines), encoding="utf-8")
@@ -174,6 +176,7 @@ def _parse_toml(path: Path, cfg: Config) -> None:
         for k in (
             "default_top_k", "rrf_k", "max_evidence_tokens", "dense_candidates",
             "lexical_candidates", "max_results_per_file", "lexical_weight", "dense_weight",
+            "exact_symbol_weight",
         ):
             if k in ret:
                 setattr(cfg.retrieval, k, ret[k])

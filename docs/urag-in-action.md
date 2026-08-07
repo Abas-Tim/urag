@@ -96,7 +96,7 @@ model = "BAAI/bge-small-en-v1.5"
 dimension = 384
 
 [index]
-languages = ["python", "typescript", "javascript", "go", "rust", "java", "c", "cpp", "csharp", "markdown"]
+languages = ["python", "typescript", "tsx", "javascript", "go", "rust", "java", "c", "cpp", "csharp", "markdown"]
 exclude = [".urag", ".git", "node_modules", "dist", "build", ".venv"]
 ```
 
@@ -276,8 +276,10 @@ An agent can call the MCP `search` tool like this:
 ```
 
 The query classifier identifies this as a local repository question. It
-selects a 2,000-token evidence budget and a default top-k of 5 unless the
-caller overrides `top_k`.
+selects a 2,000-token class budget, capped by the configured global
+`max_evidence_tokens` ceiling, and a default top-k of 5 unless the caller
+overrides `top_k`. With the generated default configuration, the returned
+budget is 1,500 tokens.
 
 The MCP tool returns a JSON string with this shape:
 
@@ -286,7 +288,7 @@ The MCP tool returns a JSON string with this shape:
   "query": "where is validate_token defined",
   "mode": "hybrid",
   "class": "local",
-  "budget_tokens": 2000,
+  "budget_tokens": 1500,
   "count": 1,
   "results": [
     {
@@ -294,8 +296,12 @@ The MCP tool returns a JSON string with this shape:
       "name": "validate_token",
       "qualname": "validate_token",
       "type": "function",
+      "kind": "symbol",
       "signature": "def validate_token(token: str) -> bool:",
       "summary": "Validate an access token.",
+      "concepts": "token, str",
+      "relationships": "",
+      "parent_id": null,
       "file": "auth.py",
       "lines": [1, 3],
       "score": 0.0323,

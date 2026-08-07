@@ -66,7 +66,8 @@ budget:
 
 Use `urag classify "<query>"` to inspect the selected class. Exact symbol
 queries use lexical retrieval. Impact queries use the call graph when a target
-symbol can be extracted.
+symbol can be extracted. The configured `max_evidence_tokens` value is a
+global ceiling and may reduce the class budget.
 
 ## Call Graph
 
@@ -124,6 +125,7 @@ Search packets commonly include:
 
 - `id`: Unit id used by `fetch_unit` or `urag get`.
 - `qualname`, `type`, `signature`, and `summary`: Symbol or document metadata.
+- `kind`, `concepts`, `relationships`, and `parent_id`: Structural context.
 - `file` and `lines`: Repository location.
 - `score` and `ranks`: Retrieval score and lexical/dense ranks.
 - `commit` and `stale`: Git provenance when available.

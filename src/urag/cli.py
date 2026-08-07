@@ -250,7 +250,11 @@ def eval_cmd(
 
         def urag_run(result) -> SystemRun:
             hits = [
-                Hit(x.file_path, x.unit.id, max(1, len(f"{x.unit.signature} {x.unit.summary}") // 4))
+                Hit(
+                    x.file_path,
+                    x.unit.id,
+                    max(1, len(json.dumps(x.to_dict(), ensure_ascii=False)) // 4),
+                )
                 for x in result.results
             ]
             return SystemRun(result.mode, hits, 0.0, sum(h.tokens for h in hits))

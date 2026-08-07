@@ -8,7 +8,7 @@ from tree_sitter import Language, Node, Parser
 import tree_sitter_python as tsp
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws, valid_aliases, walk_calls
+from .base import ByteIndexedSource, Extractor, MAX_SUMMARY_CHARS, collapse_ws, valid_aliases, walk_calls
 
 _LANG = Language(tsp.language())
 _PARSER: Parser | None = None
@@ -65,6 +65,7 @@ class PythonExtractor(Extractor):
     language = "python"
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
+        source = ByteIndexedSource(source)
         tree = _parser().parse(source.encode("utf-8"))
         units: list[Unit] = []
         self._walk(tree.root_node, source, rel_path, prefix="", parent=None, units=units)
@@ -73,6 +74,7 @@ class PythonExtractor(Extractor):
     def collect_calls(self, source: str) -> list:
         from ..models import CallSite
 
+        source = ByteIndexedSource(source)
         tree = _parser().parse(source.encode("utf-8"))
         out: list[CallSite] = []
         walk_calls(tree.root_node, source, {"call"}, out)
@@ -81,6 +83,7 @@ class PythonExtractor(Extractor):
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """(alias, fully-qualified target) for `import x as y`, `from m import n`
         and `from m import n as y`."""
+        source = ByteIndexedSource(source)
         tree = _parser().parse(source.encode("utf-8"))
         out: list[tuple[str, str]] = []
         stack: list[Node] = [tree.root_node]
@@ -134,20 +137,30 @@ class PythonExtractor(Extractor):
         units: list[Unit],
     ) -> None:
         for child in node.named_children:
-            if child.type == "function_definition":
-                units.append(self._func(child, source, rel_path, prefix, parent))
+            if child.type in ("function_definition", "async_function_definition"):
+                unit = self._func(child, source, rel_path, prefix, parent)
+                units.append(unit)
+                body = child.child_by_field_name("body")
+                if body is not None:
+                    self._walk(body, source, rel_path, unit.qualname, None, units)
             elif child.type == "class_definition":
                 self._class(child, source, rel_path, prefix, parent, units)
             elif child.type == "decorated_definition":
                 inner = child.named_children[-1] if child.named_children else None
                 if inner is None:
                     continue
-                if inner.type == "function_definition":
-                    units.append(self._func(inner, source, rel_path, prefix, parent, child))
+                if inner.type in ("function_definition", "async_function_definition"):
+                    unit = self._func(inner, source, rel_path, prefix, parent, child)
+                    units.append(unit)
+                    body = inner.child_by_field_name("body")
+                    if body is not None:
+                        self._walk(body, source, rel_path, unit.qualname, None, units)
                 elif inner.type == "class_definition":
                     self._class(inner, source, rel_path, prefix, parent, units, decorated=child)
             elif child.type in ("import_statement", "import_from_statement"):
                 units.append(self._imports(child, source, rel_path, prefix))
+            else:
+                self._walk(child, source, rel_path, prefix, parent, units)
 
     def _func(
         self,
@@ -164,7 +177,7 @@ class PythonExtractor(Extractor):
         sig_text = source[n.start_byte : (body.start_byte if body else n.end_byte)]
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         doc = _docstring(body, source) if body else ""
-        concepts = _identifiers(params, source, 6)
+        concepts = _identifiers(n, source, 12)
         decorators = self._decorator_names(decorated or n, source)
         qualname = f"{prefix}.{name}" if prefix else name
         return Unit(

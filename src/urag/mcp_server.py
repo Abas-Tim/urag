@@ -93,7 +93,7 @@ def create_server(root: Path | None = None) -> MCPServer:
         name="urag",
         title="urag project index",
         description="Structure-aware, token-efficient RAG for software projects",
-        version="0.1.0",
+        version="0.1.2",
         instructions=INSTRUCTIONS,
     )
 

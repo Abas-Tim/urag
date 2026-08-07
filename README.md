@@ -69,7 +69,7 @@ Each indexed unit has three practical layers:
 
 | Layer | Contents | Purpose |
 | --- | --- | --- |
-| Retrieval key | Name, qualified name, signature, summary, concepts | Search and embedding input |
+| Retrieval key | Name, qualified name, signature, summary, concepts, relationships | Search and embedding input |
 | Relationships | File, line, byte span, parent, calls, aliases | Navigation and impact analysis |
 | Evidence | Exact source lines on disk | Final context, loaded on demand |
 
@@ -174,6 +174,9 @@ question shape:
 Exact symbol queries are routed to lexical search. Impact queries are routed
 to the call graph when a target symbol can be identified. `--top-k` and
 `query_class` can override the defaults where supported.
+
+The configured `retrieval.max_evidence_tokens` is a global ceiling and can
+reduce the class budget; the generated default is 1,500 tokens.
 
 ## Call Graph And Impact Analysis
 
@@ -328,7 +331,7 @@ urag eval --root . --transitive 25 --alias 25 \
 uv run python benchmarks/run_bench.py --self
 ```
 
-It measures unit recall@k, file recall@k, precision, MRR, approximate tokens
+It measures fractional unit recall@k, file recall@k, precision, MRR, approximate tokens
 per retrieval, and p50/p95 latency. Definition and call questions can be
 generated with provable gold data from the index. Custom conceptual questions
 can be supplied as JSONL:
@@ -351,10 +354,12 @@ performance guarantees.
 | urag repository | `urag-transitive` | 47 | 1.000 | 1.000 | 1.000 | 10.38 ms | 78.2 |
 | urag repository | `urag-hybrid` | 57 | 0.316 | 0.077 | 0.252 | 4.38 ms | 134.7 |
 
-The transitive system reached `indirect_recall=1.000` on the synthetic
+The checked-in reports predate the current index-lifecycle and retrieval-quality
+changes; rerun the benchmark before comparing new results. The transitive system
+reached `indirect_recall=1.000` on the synthetic
 fixture and `0.440` on the checked-in urag repository report. In the current
-evaluation harness, unit recall is binary per question: it means at least one
-gold unit was retrieved, not that every gold unit was returned. Graph systems
+evaluation harness, unit recall is fractional across the gold units for a
+question. Graph systems
 also run on graph-eligible questions, while the hybrid row includes the full
 generated question set, so the rows are directional rather than a universal
 ranking.

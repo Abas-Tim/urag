@@ -43,6 +43,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
+          enable-cache: false
       - name: Install
         run: uv sync --group dev
       - name: Test

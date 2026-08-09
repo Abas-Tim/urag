@@ -89,6 +89,13 @@ class RgBaseline:
     def __init__(self, root: Path):
         self.root = root
 
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        normalized = path.replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized
+
     def search(self, query: str, top_k: int, db: Database) -> SystemRun:
         import re
 
@@ -101,7 +108,7 @@ class RgBaseline:
         for term in terms:
             try:
                 proc = subprocess.run(
-                    ["rg", "--no-messages", "-i", "--count-matches", term, "."],
+                    ["rg", "--no-messages", "-i", "--count-matches", "-F", term, "."],
                     cwd=str(self.root),
                     capture_output=True,
                     text=True,
@@ -112,8 +119,9 @@ class RgBaseline:
             for line in proc.stdout.splitlines():
                 if ":" in line:
                     path, cnt = line.rsplit(":", 1)
+                    path = self._normalize_path(path)
                     try:
-                        counts[path.replace("\\", "/")] = counts.get(path.replace("\\", "/"), 0) + int(cnt)
+                        counts[path] = counts.get(path, 0) + int(cnt)
                     except ValueError:
                         continue
         ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[: top_k * 2]
@@ -125,14 +133,16 @@ class RgBaseline:
                 (path, 3),
             ).fetchall()
             ids = [r["id"] for r in rows]
-            matched_txt = cnt * 40  # ~matched lines worth of context
+            matched_tokens = max(1, cnt * 10)
             for uid in ids:
-                hits.append(Hit(path, uid, _tokens(str(matched_txt))))
+                hits.append(Hit(path, uid, matched_tokens))
             if not ids:
-                hits.append(Hit(path, None, _tokens(str(matched_txt))))
+                hits.append(Hit(path, None, matched_tokens))
             if len(hits) >= top_k * 5:
                 break
-        return SystemRun("rg", hits, time.perf_counter() - t0, sum(h.tokens for h in hits))
+        return SystemRun(
+            "rg", hits, time.perf_counter() - t0, sum(h.tokens for h in hits)
+        )
 
 
 class ChunkBaseline:
@@ -144,7 +154,9 @@ class ChunkBaseline:
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
-        chunks: list[tuple[str, str, int, int]] = []  # (file, text, byte_start, byte_end)
+        chunks: list[
+            tuple[str, str, int, int]
+        ] = []  # (file, text, byte_start, byte_end)
         for p in Indexer(cfg, db, embedder).discover():
             rel = p.relative_to(cfg.project_root).as_posix()
             try:
@@ -164,8 +176,7 @@ class ChunkBaseline:
         t0 = time.perf_counter()
         q = self.embedder.embed_query(query)
         scored = [
-            (i, sum(a * b for a, b in zip(q, v)))
-            for i, v in enumerate(self.vectors)
+            (i, sum(a * b for a, b in zip(q, v))) for i, v in enumerate(self.vectors)
         ]
         scored.sort(key=lambda kv: kv[1], reverse=True)
         hits: list[Hit] = []
@@ -173,7 +184,9 @@ class ChunkBaseline:
             file, text, bs, be = self.chunks[i]
             unit_id = self._unit_at(db, file, bs)
             hits.append(Hit(file, unit_id, _tokens(text)))
-        return SystemRun("chunk-rag", hits, time.perf_counter() - t0, sum(h.tokens for h in hits))
+        return SystemRun(
+            "chunk-rag", hits, time.perf_counter() - t0, sum(h.tokens for h in hits)
+        )
 
     @staticmethod
     def _unit_at(db: Database, file: str, byte_start: int) -> int | None:
@@ -194,14 +207,28 @@ class OracleBaseline:
     def __init__(self, root: Path):
         self.root = root
 
+    def _safe_file(self, relative_path: str) -> Path | None:
+        root = self.root.resolve()
+        candidate = (root / relative_path).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return candidate
+
     def search(self, question: Question, db: Database) -> SystemRun:
         hits: list[Hit] = []
         total = 0
         if question.gold_file:
-            p = self.root / question.gold_file
-            if p.exists():
+            p = self._safe_file(question.gold_file)
+            if p and p.is_file():
                 txt = p.read_text(encoding="utf-8", errors="replace")
-                return SystemRun("oracle", [Hit(question.gold_file, None, _tokens(txt))], 0.0, _tokens(txt))
+                return SystemRun(
+                    "oracle",
+                    [Hit(question.gold_file, None, _tokens(txt))],
+                    0.0,
+                    _tokens(txt),
+                )
         for gid in question.gold_unit_ids:
             got = db.unit_by_id(gid)
             if got:
@@ -210,7 +237,9 @@ class OracleBaseline:
                     text = db.load_evidence(gid) or {}
                     span = text.get("span", "")
                     total += _tokens(span) if span else _unit_tokens(u)
-                    hits.append(Hit(path, gid, _tokens(span) if span else _unit_tokens(u)))
+                    hits.append(
+                        Hit(path, gid, _tokens(span) if span else _unit_tokens(u))
+                    )
         return SystemRun("oracle", hits, 0.0, total)
 
 
@@ -306,11 +335,20 @@ def _raw_callers(db: Database, names: list[str]) -> list[dict]:
     for r in rows:
         got = db.unit_by_id(r["caller_unit_id"])
         if got:
-            out.append({"unit": got[0], "path": r["path"], "callee_full": r["callee_full"], "line": r["line"]})
+            out.append(
+                {
+                    "unit": got[0],
+                    "path": r["path"],
+                    "callee_full": r["callee_full"],
+                    "line": r["line"],
+                }
+            )
     return out
 
 
-def transitive_caller_ids(db: Database, name: str, max_depth: int = 3) -> dict[int, int]:
+def transitive_caller_ids(
+    db: Database, name: str, max_depth: int = 3
+) -> dict[int, int]:
     """BFS over call_edges: unit_id -> shortest hop (1 = direct caller)."""
     seen: dict[int, int] = {}
     frontier: list[str] = [name]
@@ -332,9 +370,13 @@ def transitive_caller_ids(db: Database, name: str, max_depth: int = 3) -> dict[i
     return seen
 
 
-def autogen_transitive_questions(db: Database, n: int, max_depth: int = 3) -> list[Question]:
+def autogen_transitive_questions(
+    db: Database, n: int, max_depth: int = 3
+) -> list[Question]:
     """Questions whose gold = ALL transitive callers (hops 1..max_depth)."""
-    rows = db.conn.execute("SELECT DISTINCT callee FROM call_edges ORDER BY callee").fetchall()
+    rows = db.conn.execute(
+        "SELECT DISTINCT callee FROM call_edges ORDER BY callee"
+    ).fetchall()
     qs: list[Question] = []
     for r in _seeded_shuffle(rows):
         callee = r["callee"]
@@ -381,7 +423,9 @@ def scan_import_aliases(source: str, language: str) -> dict[str, str]:
                 continue
             m = re.match(r"^import\s+(\w+)\s+from\s+['\"]([^'\"]+)['\"]", s)
             if m:
-                aliases[m.group(1)] = f"{m.group(2).strip('@').replace('/', '.')}.default"
+                aliases[m.group(1)] = (
+                    f"{m.group(2).strip('@').replace('/', '.')}.default"
+                )
                 continue
             m = re.match(r"^import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]", s)
             if m:
@@ -446,7 +490,7 @@ def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
                 if c.callee_full == alias:
                     real = target
                 elif c.callee_full.startswith(prefix):
-                    real = f"{target}.{c.callee_full[len(prefix):]}"
+                    real = f"{target}.{c.callee_full[len(prefix) :]}"
                 else:
                     continue
                 owner = _unit_at_byte(db, f["id"], c.byte_start)
@@ -473,22 +517,35 @@ def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
 
 def load_questions(path: Path) -> list[Question]:
     out: list[Question] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        d = json.loads(line)
-        out.append(
-            Question(
-                query=d["query"],
-                gold_unit_ids=d.get("gold_unit_ids", []),
-                gold_file=d.get("gold_file", ""),
-                label=d.get("label", "custom"),
-                target=d.get("target", ""),
-                depth=d.get("depth", 1),
-                gold_hops={int(k): v for k, v in d.get("gold_hops", {}).items()},
+        try:
+            d = json.loads(line)
+            if not isinstance(d, dict):
+                raise ValueError("expected a JSON object")
+            out.append(
+                Question(
+                    query=d["query"],
+                    gold_unit_ids=d.get("gold_unit_ids", []),
+                    gold_file=d.get("gold_file", ""),
+                    label=d.get("label", "custom"),
+                    target=d.get("target", ""),
+                    depth=d.get("depth", 1),
+                    gold_hops={int(k): v for k, v in d.get("gold_hops", {}).items()},
+                )
             )
-        )
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ) as exc:
+            raise ValueError(f"{path}:{line_number}: invalid question: {exc}") from exc
     return out
 
 
@@ -559,7 +616,7 @@ def aggregate(rows: list[dict]) -> dict:
         "mrr": sum(r["mrr"] for r in rows) / n,
         "mean_tokens": sum(r["tokens"] for r in rows) / n,
         "mean_sec": sum(lat) / n,
-        "p50_sec": lat[int(math.floor(0.50 * n))] if n else 0.0,
+        "p50_sec": lat[(n - 1) // 2] if n else 0.0,
         "p95_sec": lat[int(math.ceil(0.95 * n)) - 1] if n else 0.0,
     }
 
@@ -577,7 +634,9 @@ def _llm_chat(url: str, model: str, key: str, messages: list[dict]) -> str:
         headers["Authorization"] = f"Bearer {key}"
     payload = {"model": model, "messages": messages, "temperature": 0.2}
     with httpx.Client(timeout=60) as client:
-        resp = client.post(url.rstrip("/") + "/chat/completions", json=payload, headers=headers)
+        resp = client.post(
+            url.rstrip("/") + "/chat/completions", json=payload, headers=headers
+        )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
@@ -591,7 +650,7 @@ def judge_results(
     model: str,
     key: str,
     progress=None,
-) -> dict[str, dict]:
+) -> dict[str, float]:
     """Answer each question per system with the LLM, then grade the answer."""
     from .extractors import get_extractor
 
@@ -603,20 +662,40 @@ def judge_results(
             if run is None:
                 continue
             context = _system_context(run, q, db, cfg)
-            ans = _llm_chat(
-                url, model, key,
-                [
-                    {"role": "system", "content": "You answer questions about a codebase using ONLY the provided context. If the context is insufficient, say so explicitly and mark it insufficient."},
-                    {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {q.query}\nAnswer concisely."},
-                ],
-            )
-            grade = _llm_chat(
-                url, model, key,
-                [
-                    {"role": "system", "content": "You are an evaluation judge. Given a question, a candidate answer, and the context that was available, respond with ONLY a JSON object {\"correct\": 0-10, \"sufficient\": \"yes\"|\"no\"}. correct = how well the answer answers the question given the available context (not hallucinating)."},
-                    {"role": "user", "content": f"QUESTION: {q.query}\n\nANSWER:\n{ans}\n\nCONTEXT_AVAILABLE:\n{context}"},
-                ],
-            )
+            try:
+                ans = _llm_chat(
+                    url,
+                    model,
+                    key,
+                    [
+                        {
+                            "role": "system",
+                            "content": "You answer questions about a codebase using ONLY the provided context. If the context is insufficient, say so explicitly and mark it insufficient.",
+                        },
+                        {
+                            "role": "user",
+                            "content": f"CONTEXT:\n{context}\n\nQUESTION: {q.query}\nAnswer concisely.",
+                        },
+                    ],
+                )
+                grade = _llm_chat(
+                    url,
+                    model,
+                    key,
+                    [
+                        {
+                            "role": "system",
+                            "content": 'You are an evaluation judge. Given a question, a candidate answer, and the context that was available, respond with ONLY a JSON object {"correct": 0-10, "sufficient": "yes"|"no"}. correct = how well the answer answers the question given the available context (not hallucinating).',
+                        },
+                        {
+                            "role": "user",
+                            "content": f"QUESTION: {q.query}\n\nANSWER:\n{ans}\n\nCONTEXT_AVAILABLE:\n{context}",
+                        },
+                    ],
+                )
+            except Exception:
+                log(f"  [{sys_name}] q{i}: judge request failed")
+                continue
             try:
                 g = json.loads(grade)
                 scores.setdefault(sys_name, []).append(float(g.get("correct", 0)))

@@ -7,12 +7,15 @@ then fetch exact source spans only for the units you plan to use.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
-from .config import Config, discover_project_root, load_config
+from . import __version__
+from .config import Config, discover_project_root, ensure_gitignore, load_config
 from .db import Database
 from .embed import Embedder, NoopEmbedder, create_embedder
 from .git_aware import Git
@@ -47,8 +50,32 @@ def _embedder(cfg: Config) -> Embedder:
         return _embedder_cache[key]
 
 
-def _open(cfg: Config) -> Database:
-    return Database(cfg.db_path, cfg.embedding.dimension)
+class IndexUnavailableError(RuntimeError):
+    pass
+
+
+def _open(cfg: Config, create: bool = False) -> Database:
+    if not create and not cfg.db_path.is_file():
+        raise IndexUnavailableError("index missing; call init_project")
+    try:
+        return Database(cfg.db_path, cfg.embedding.dimension)
+    except (sqlite3.DatabaseError, RuntimeError) as exc:
+        raise IndexUnavailableError(f"index unavailable: {exc}") from exc
+
+
+@contextmanager
+def _database(cfg: Config, create: bool = False):
+    db = _open(cfg, create=create)
+    try:
+        yield db
+    except sqlite3.DatabaseError as exc:
+        raise IndexUnavailableError(f"index unavailable: {exc}") from exc
+    finally:
+        db.close()
+
+
+def _error_response(exc: IndexUnavailableError) -> str:
+    return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
 def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
@@ -86,14 +113,15 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
 
 
 def create_server(root: Path | None = None) -> MCPServer:
-    cfg = load_config(discover_project_root(root))
+    project_root = root.resolve() if root is not None else discover_project_root()
+    cfg = load_config(project_root)
     git = Git(cfg.project_root)
 
     server = MCPServer(
         name="urag",
         title="urag project index",
         description="Structure-aware, token-efficient RAG for software projects",
-        version="0.1.2",
+        version=__version__,
         instructions=INSTRUCTIONS,
     )
 
@@ -116,26 +144,32 @@ def create_server(root: Path | None = None) -> MCPServer:
         include_evidence: bool = False,
         query_class: str | None = None,
     ) -> str:
-        db = _open(cfg)
         try:
-            result = Retriever(cfg, db, _embedder(cfg), git).search(
-                query, top_k=top_k, mode=mode or "hybrid",
-                language=language, query_class=query_class,
-            )
-            packets = [_packet(r, include_evidence, db, result.budget_tokens) for r in result.results]
-            return json.dumps(
-                {
-                    "query": query,
-                    "mode": result.mode,
-                    "class": result.query_class,
-                    "budget_tokens": result.budget_tokens,
-                    "count": len(packets),
-                    "results": packets,
-                },
-                ensure_ascii=False,
-            )
-        finally:
-            db.close()
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).search(
+                    query,
+                    top_k=top_k,
+                    mode=mode or "hybrid",
+                    language=language,
+                    query_class=query_class,
+                )
+                packets = [
+                    _packet(r, include_evidence, db, result.budget_tokens)
+                    for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "query": query,
+                        "mode": result.mode,
+                        "class": result.query_class,
+                        "budget_tokens": result.budget_tokens,
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
 
     @server.tool(
         name="fetch_unit",
@@ -147,12 +181,16 @@ def create_server(root: Path | None = None) -> MCPServer:
         ),
     )
     def fetch_unit(unit_id: int) -> str:
-        db = _open(cfg)
         try:
-            ev = Retriever(cfg, db, _embedder(cfg), git).get(unit_id)
-            return json.dumps(ev, ensure_ascii=False) if ev else json.dumps({"error": "unit not found"})
-        finally:
-            db.close()
+            with _database(cfg) as db:
+                ev = Retriever(cfg, db, _embedder(cfg), git).get(unit_id)
+                return (
+                    json.dumps(ev, ensure_ascii=False)
+                    if ev
+                    else json.dumps({"error": "unit not found"})
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
 
     @server.tool(
         name="callers",
@@ -166,20 +204,28 @@ def create_server(root: Path | None = None) -> MCPServer:
         ),
     )
     def callers(name: str, limit: int = 20, depth: int = 1) -> str:
-        db = _open(cfg)
         try:
-            retriever = Retriever(cfg, db, _embedder(cfg), git)
-            if depth > 1:
-                result = retriever.search_transitive(name, depth=depth, limit=limit)
-            else:
-                result = retriever.search_callers(name, limit=limit)
-            packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
-            return json.dumps(
-                {"query": name, "mode": "calls", "depth": depth, "count": len(packets), "results": packets},
-                ensure_ascii=False,
-            )
-        finally:
-            db.close()
+            with _database(cfg) as db:
+                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                if depth > 1:
+                    result = retriever.search_transitive(name, depth=depth, limit=limit)
+                else:
+                    result = retriever.search_callers(name, limit=limit)
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "query": name,
+                        "mode": "calls",
+                        "depth": depth,
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
 
     @server.tool(
         name="index_now",
@@ -187,21 +233,21 @@ def create_server(root: Path | None = None) -> MCPServer:
         description="Incrementally re-index changed files and embed new units.",
     )
     def index_now() -> str:
-        db = _open(cfg)
         try:
-            indexer = Indexer(cfg, db, _embedder(cfg))
-            stats = indexer.index_all()
-            s = db.stats()
-            return json.dumps(
-                {
-                    **stats,
-                    "units": s.units,
-                    "embedded": s.embedded,
-                    "last_indexed": s.last_indexed,
-                }
-            )
-        finally:
-            db.close()
+            with _database(cfg) as db:
+                indexer = Indexer(cfg, db, _embedder(cfg))
+                stats = indexer.index_all()
+                s = db.stats()
+                return json.dumps(
+                    {
+                        **stats,
+                        "units": s.units,
+                        "embedded": s.embedded,
+                        "last_indexed": s.last_indexed,
+                    }
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
 
     @server.tool(
         name="status",
@@ -209,24 +255,27 @@ def create_server(root: Path | None = None) -> MCPServer:
         description="Index stats: files, units, embeddings, freshness, config.",
     )
     def status() -> str:
-        db = _open(cfg)
         try:
-            s = db.stats()
+            with _database(cfg) as db:
+                s = db.stats()
+                return json.dumps(
+                    {
+                        "root": str(cfg.project_root),
+                        "files": s.files,
+                        "units": s.units,
+                        "embedded": s.embedded,
+                        "by_language": s.by_language,
+                        "last_indexed": s.last_indexed,
+                        "provider": cfg.embedding.provider,
+                        "model": cfg.embedding.model,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
             return json.dumps(
-                {
-                    "root": str(cfg.project_root),
-                    "files": s.files,
-                    "units": s.units,
-                    "embedded": s.embedded,
-                    "by_language": s.by_language,
-                    "last_indexed": s.last_indexed,
-                    "provider": cfg.embedding.provider,
-                    "model": cfg.embedding.model,
-                },
+                {"root": str(cfg.project_root), "error": str(exc)},
                 ensure_ascii=False,
             )
-        finally:
-            db.close()
 
     @server.tool(
         name="init_project",
@@ -238,22 +287,23 @@ def create_server(root: Path | None = None) -> MCPServer:
     )
     def init_project() -> str:
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
-        db = _open(cfg)
+        ensure_gitignore(cfg.project_root)
         try:
-            indexer = Indexer(cfg, db, _embedder(cfg))
-            stats = indexer.index_all()
-            s = db.stats()
-            return json.dumps(
-                {
-                    "initialized": True,
-                    "root": str(cfg.project_root),
-                    **stats,
-                    "units": s.units,
-                    "embedded": s.embedded,
-                }
-            )
-        finally:
-            db.close()
+            with _database(cfg, create=True) as db:
+                indexer = Indexer(cfg, db, _embedder(cfg))
+                stats = indexer.index_all()
+                s = db.stats()
+                return json.dumps(
+                    {
+                        "initialized": True,
+                        "root": str(cfg.project_root),
+                        **stats,
+                        "units": s.units,
+                        "embedded": s.embedded,
+                    }
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
 
     return server
 

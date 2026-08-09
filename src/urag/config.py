@@ -76,7 +76,13 @@ class EmbeddingConfig:
 
     def fingerprint(self) -> str:
         return "|".join(
-            [self.provider, self.model, str(self.dimension), self.http_url, self.http_model]
+            [
+                self.provider,
+                self.model,
+                str(self.dimension),
+                self.http_url,
+                self.http_model,
+            ]
         )
 
 
@@ -165,17 +171,37 @@ def _parse_toml(path: Path, cfg: Config) -> None:
     idx = data.get("index", {})
     ret = data.get("retrieval", {})
     if emb:
-        for k in ("provider", "model", "dimension", "http_url", "http_api_key", "http_model", "http_timeout"):
+        for k in (
+            "provider",
+            "model",
+            "dimension",
+            "http_url",
+            "http_api_key",
+            "http_model",
+            "http_timeout",
+        ):
             if k in emb:
                 setattr(cfg.embedding, k, emb[k])
     if idx:
-        for k in ("languages", "exclude", "include", "ignore_gitignore", "max_file_bytes"):
+        for k in (
+            "languages",
+            "exclude",
+            "include",
+            "ignore_gitignore",
+            "max_file_bytes",
+        ):
             if k in idx:
                 setattr(cfg.index, k, idx[k])
     if ret:
         for k in (
-            "default_top_k", "rrf_k", "max_evidence_tokens", "dense_candidates",
-            "lexical_candidates", "max_results_per_file", "lexical_weight", "dense_weight",
+            "default_top_k",
+            "rrf_k",
+            "max_evidence_tokens",
+            "dense_candidates",
+            "lexical_candidates",
+            "max_results_per_file",
+            "lexical_weight",
+            "dense_weight",
             "exact_symbol_weight",
         ):
             if k in ret:
@@ -190,6 +216,24 @@ def load_config(project_root: Path) -> Config:
     else:
         cfg.save()
     return cfg
+
+
+def ensure_gitignore(project_root: Path) -> bool:
+    gitignore = project_root / ".gitignore"
+    entry = f"{UURAG_DIR}/"
+    content = (
+        gitignore.read_text(encoding="utf-8", errors="replace")
+        if gitignore.exists()
+        else ""
+    )
+    if entry in content.splitlines():
+        return False
+    prefix = content.rstrip()
+    gitignore.write_text(
+        (prefix + "\n" if prefix else "") + entry + "\n",
+        encoding="utf-8",
+    )
+    return True
 
 
 def discover_project_root(start: Path | None = None) -> Path:

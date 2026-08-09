@@ -1,9 +1,14 @@
 """Tests for native-language extractors (go, rust, java, c, cpp)."""
 
-from urag.extractors.native_ext import GoExtractor, RustExtractor, JavaExtractor, CExtractor
+from urag.extractors.native_ext import (
+    GoExtractor,
+    RustExtractor,
+    JavaExtractor,
+    CExtractor,
+)
 
 
-GO_SRC = '''package auth
+GO_SRC = """package auth
 
 import "strings"
 
@@ -23,7 +28,7 @@ func (v *TokenValidator) Validate(token string) bool {
 type Validatable interface {
     Validate(token string) bool
 }
-'''
+"""
 
 
 def test_go():
@@ -38,7 +43,7 @@ def test_go():
     assert "ParseToken" in pt.summary
 
 
-RUST_SRC = '''use std::collections::HashMap;
+RUST_SRC = """use std::collections::HashMap;
 
 /// Parses a raw token.
 pub fn parse_token(raw: &str) -> Result<String, Error> {
@@ -67,7 +72,7 @@ pub enum TokenKind {
     Bearer,
     ApiKey,
 }
-'''
+"""
 
 
 def test_rust():
@@ -83,7 +88,7 @@ def test_rust():
     assert "Parses a raw token" in pt.summary
 
 
-JAVA_SRC = '''package com.example.auth;
+JAVA_SRC = """package com.example.auth;
 
 import java.util.List;
 
@@ -109,7 +114,7 @@ public interface Validatable {
 public enum TokenKind {
     BEARER, API_KEY
 }
-'''
+"""
 
 
 def test_java():
@@ -124,7 +129,7 @@ def test_java():
     assert "JWT" in tv.summary
 
 
-C_SRC = '''#include <stdio.h>
+C_SRC = """#include <stdio.h>
 
 /* Validates a raw token. */
 int validate_token(const char *token) {
@@ -139,7 +144,7 @@ struct TokenStore {
     char *name;
     int (*save)(const char *);
 };
-'''
+"""
 
 
 def test_c():
@@ -153,13 +158,14 @@ def test_c():
     assert "Validates a raw token" in vt.summary
 
 
-CPP_SRC = '''#include <string>
+CPP_SRC = """#include <string>
 
 namespace auth {
 
 class TokenValidator {
 public:
     bool validate(const std::string& token);
+    bool validate(const std::string& token) const;
 private:
     int ttl_ = 60;
 };
@@ -170,7 +176,17 @@ T parse_token(const std::string& raw) {
 }
 
 }  // namespace auth
-'''
+
+bool auth::TokenValidator::validate(const std::string& token) {
+    return !token.empty();
+}
+
+bool auth::TokenValidator::validate(const std::string& token) const {
+    return !token.empty();
+}
+
+void auth::helper() {}
+"""
 
 
 def test_cpp():
@@ -179,3 +195,5 @@ def test_cpp():
     assert ("class", "TokenValidator", "auth::TokenValidator") in types
     assert ("method", "validate", "auth::TokenValidator::validate") in types
     assert ("function", "parse_token", "auth::parse_token") in types
+    assert sum(1 for t in types if t[2] == "auth::TokenValidator::validate") == 2
+    assert ("function", "helper", "auth::helper") in types

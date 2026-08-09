@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ from .config import (
     UURAG_DIR,
     Config,
     discover_project_root,
+    ensure_gitignore,
     load_config,
     default_model_cache_dir,
 )
@@ -33,19 +35,25 @@ from .indexer import Indexer
 from .retrieve import Retriever
 from .watcher import run_watch
 
-app = typer.Typer(help="urag: structure-aware, token-efficient RAG for projects", no_args_is_help=True)
+app = typer.Typer(
+    help="urag: structure-aware, token-efficient RAG for projects", no_args_is_help=True
+)
+console = Console()
+error_console = Console(stderr=True)
 
 
 @app.callback(invoke_without_command=True)
 def _root_callback(
-    version: bool = typer.Option(False, "--version", help="show version and exit", show_default=False),
+    version: bool = typer.Option(
+        False, "--version", help="show version and exit", show_default=False
+    ),
 ) -> None:
     if version:
         from . import __version__
 
         console.print(f"urag {__version__}")
         raise typer.Exit()
-console = Console()
+
 
 _embedder_cache: dict[str, Embedder] = {}
 
@@ -57,7 +65,9 @@ def _embedder(cfg: Config) -> Embedder:
     try:
         emb = create_embedder(cfg.embedding)
     except Exception as exc:
-        console.print(f"[yellow]warning: embedding unavailable ({exc}); using lexical-only mode[/yellow]")
+        error_console.print(
+            f"[yellow]warning: embedding unavailable ({exc}); using lexical-only mode[/yellow]"
+        )
         emb = NoopEmbedder()
     _embedder_cache[key] = emb
     return emb
@@ -77,7 +87,9 @@ def _engine(root: Path | None = None) -> tuple[Config, Database]:
 def init(
     root: Path = typer.Option(".", help="project root to index"),
     full: bool = typer.Option(False, "--full", help="also run a full index"),
-    no_embed: bool = typer.Option(False, "--no-embed", help="skip model download / embedding"),
+    no_embed: bool = typer.Option(
+        False, "--no-embed", help="skip model download / embedding"
+    ),
 ):
     """Set up .urag/ config and initial index for a project."""
     root = root.resolve()
@@ -85,15 +97,12 @@ def init(
     if not cfg.urag_dir.exists():
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
     gi = root / ".gitignore"
-    entry = f"{UURAG_DIR}/"
-    if gi.exists():
-        content = gi.read_text(encoding="utf-8", errors="replace")
-        if entry not in content.splitlines():
-            gi.write_text(content.rstrip() + f"\n{entry}\n", encoding="utf-8")
-            console.print(f"[green]added {entry} to {gi}[/green]")
-    else:
-        gi.write_text(f"{entry}\n", encoding="utf-8")
-        console.print(f"[green]created {gi} with {entry} entry[/green]")
+    gitignore_existed = gi.exists()
+    if ensure_gitignore(root):
+        if gitignore_existed:
+            console.print(f"[green]added {UURAG_DIR}/ to {gi}[/green]")
+        else:
+            console.print(f"[green]created {gi} with {UURAG_DIR}/ entry[/green]")
     db = Database(cfg.db_path, cfg.embedding.dimension)
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")
@@ -120,7 +129,9 @@ def index(
 @app.command()
 def watch(
     root: Path = typer.Option(".", help="project root"),
-    rescan_minutes: float = typer.Option(30, "--rescan", help="periodic full rescan interval (0 = off)"),
+    rescan_minutes: float = typer.Option(
+        30, "--rescan", help="periodic full rescan interval (0 = off)"
+    ),
 ):
     """Continuously re-index on file changes."""
     cfg, db = _engine(root)
@@ -135,7 +146,9 @@ def search(
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
     mode: str = typer.Option("hybrid", "--mode", help="hybrid | lexical | dense"),
-    language: Optional[str] = typer.Option(None, "--language", help="filter by language"),
+    language: Optional[str] = typer.Option(
+        None, "--language", help="filter by language"
+    ),
     evidence: bool = typer.Option(False, "--evidence", help="include L2 source spans"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
@@ -154,17 +167,25 @@ def search(
 
                 for r in payload["results"]:
                     ev = db.load_evidence(r["id"])
-                    r["evidence"] = fit_evidence(ev["span"], result.budget_tokens) if ev and "span" in ev else None
+                    r["evidence"] = (
+                        fit_evidence(ev["span"], result.budget_tokens)
+                        if ev and "span" in ev
+                        else None
+                    )
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return
-        console.print(f"[dim]class={result.query_class} budget={result.budget_tokens} tok · {result.mode}[/dim]")
+        console.print(
+            f"[dim]class={result.query_class} budget={result.budget_tokens} tok · {result.mode}[/dim]"
+        )
         if not result.results:
             console.print("[yellow]no results[/yellow]")
             return
         for r in result.results:
             u = r.unit
             loc = f"{r.file_path}:{u.start_line}-{u.end_line}"
-            head = f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{loc}[/dim]"
+            head = (
+                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{loc}[/dim]"
+            )
             if r.stale:
                 head += " [red][stale][/red]"
             console.print(head)
@@ -182,13 +203,17 @@ def search(
             if badges:
                 console.print(f"  [dim]{' '.join(badges)} · score {r.score:.3f}[/dim]")
             if r.caller_of:
-                console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
+                console.print(
+                    f"  [green]calls {r.caller_of} at line {r.call_line}[/green]"
+                )
             if evidence:
                 from .retrieve import fit_evidence
 
                 ev = db.load_evidence(u.id) if u.id else None
                 if ev and "span" in ev:
-                    console.print(f"  [dim]--- evidence (lines {ev['lines'][0]}-{ev['lines'][1]}, budget {result.budget_tokens} tok) ---[/dim]")
+                    console.print(
+                        f"  [dim]--- evidence (lines {ev['lines'][0]}-{ev['lines'][1]}, budget {result.budget_tokens} tok) ---[/dim]"
+                    )
                     console.print(fit_evidence(ev["span"], result.budget_tokens))
     finally:
         db.close()
@@ -197,17 +222,41 @@ def search(
 @app.command("eval")
 def eval_cmd(
     root: Path = typer.Option(".", help="project root"),
-    questions: Optional[Path] = typer.Option(None, "--questions", help="JSONL of {query, gold_file?, gold_unit_ids?}"),
-    autogen: Optional[int] = typer.Option(None, "--autogen", help="auto-generate N definition + N call questions with provable gold"),
-    transitive: Optional[int] = typer.Option(None, "--transitive", help="add N multi-hop (callers-of-callers) questions with provable gold"),
-    alias: Optional[int] = typer.Option(None, "--alias", help="add N import-alias resolution questions with provable gold"),
+    questions: Optional[Path] = typer.Option(
+        None, "--questions", help="JSONL of {query, gold_file?, gold_unit_ids?}"
+    ),
+    autogen: Optional[int] = typer.Option(
+        None,
+        "--autogen",
+        help="auto-generate N definition + N call questions with provable gold",
+    ),
+    transitive: Optional[int] = typer.Option(
+        None,
+        "--transitive",
+        help="add N multi-hop (callers-of-callers) questions with provable gold",
+    ),
+    alias: Optional[int] = typer.Option(
+        None,
+        "--alias",
+        help="add N import-alias resolution questions with provable gold",
+    ),
     top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
-    systems: Optional[str] = typer.Option(None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"),
-    judge_url: Optional[str] = typer.Option(None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"),
-    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="judge model name"),
-    judge_key: Optional[str] = typer.Option(None, "--judge-key", help="judge API key"),
+    systems: Optional[str] = typer.Option(
+        None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"
+    ),
+    judge_url: Optional[str] = typer.Option(
+        None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"
+    ),
+    judge_model: Optional[str] = typer.Option(
+        None, "--judge-model", help="judge model name"
+    ),
+    judge_key: Optional[str] = typer.Option(
+        None, "--judge-key", help="judge API key (prefer URAG_JUDGE_KEY)"
+    ),
     json_out: bool = typer.Option(False, "--json", help="machine-readable report"),
-    report: Optional[Path] = typer.Option(None, "--report", help="write full report JSON to this file"),
+    report: Optional[Path] = typer.Option(
+        None, "--report", help="write full report JSON to this file"
+    ),
 ):
     """Compare urag retrieval vs grep / chunk-RAG / whole-file baselines."""
     from .eval import (
@@ -260,11 +309,13 @@ def eval_cmd(
             return SystemRun(result.mode, hits, 0.0, sum(h.tokens for h in hits))
 
         rows: dict[str, list[dict]] = {s: [] for s in chosen}
-        runs_by_system: dict[str, dict[int, object]] = {}
-        console.print(f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]")
+        runs_by_system: dict[str, dict[int, SystemRun]] = {}
+        console.print(
+            f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]"
+        )
         for i, q in enumerate(qs):
             t = time.perf_counter()
-            runs: dict[str, object] = {}
+            runs: dict[str, SystemRun] = {}
             if "urag-hybrid" in chosen:
                 r = retriever.search(q.query, top_k=top_k, query_class="local")
                 run = urag_run(r)
@@ -278,7 +329,7 @@ def eval_cmd(
                 runs["urag-lexical"] = run
             if "rg" in chosen:
                 runs["rg"] = rg.search(q.query, top_k, db)
-            if "chunk" in chosen:
+            if chunk is not None:
                 runs["chunk"] = chunk.search(q.query, top_k, db)
             if q.target and ("urag-callers" in chosen or "urag-transitive" in chosen):
                 if "urag-callers" in chosen:
@@ -289,11 +340,9 @@ def eval_cmd(
                     runs["urag-callers"] = run
                 if "urag-transitive" in chosen:
                     t = time.perf_counter()
-                    st = getattr(retriever, "search_transitive", None)
-                    if st is None:
-                        r = retriever.search_callers(q.target, limit=top_k)
-                    else:
-                        r = st(q.target, depth=q.depth or 3, limit=top_k)
+                    r = retriever.search_transitive(
+                        q.target, depth=q.depth or 3, limit=top_k
+                    )
                     run = urag_run(r)
                     run.seconds = time.perf_counter() - t
                     runs["urag-transitive"] = run
@@ -317,7 +366,9 @@ def eval_cmd(
             if report:
                 report.write_text(text, encoding="utf-8")
         if not json_out:
-            t = Table(title=f"urag eval — {cfg.project_root} ({len(qs)} questions, top_k={top_k})")
+            t = Table(
+                title=f"urag eval — {cfg.project_root} ({len(qs)} questions, top_k={top_k})"
+            )
             t.add_column("system")
             t.add_column("recall@k")
             t.add_column("mrr")
@@ -331,15 +382,21 @@ def eval_cmd(
                     f"{a.get('unit_recall', 0):.2f}",
                     f"{a.get('mrr', 0):.2f}",
                     f"{a.get('mean_tokens', 0):.0f}",
-                    f"{a.get('p50_sec', 0)*1000:.0f}ms",
-                    f"{a.get('p95_sec', 0)*1000:.0f}ms",
+                    f"{a.get('p50_sec', 0) * 1000:.0f}ms",
+                    f"{a.get('p95_sec', 0) * 1000:.0f}ms",
                 )
             console.print(t)
 
         if judge_url:
             console.print("[dim]running LLM judge tier...[/dim]")
             scores = judge_results(
-                qs, runs_by_system, db, cfg, judge_url, judge_model or "gpt-4o-mini", judge_key or "",
+                qs,
+                runs_by_system,
+                db,
+                cfg,
+                judge_url,
+                judge_model or "gpt-4o-mini",
+                judge_key or os.environ.get("URAG_JUDGE_KEY", ""),
                 progress=lambda m: console.print(m),
             )
             console.print("[bold]answer quality (correct 0-10):[/bold]")
@@ -354,7 +411,12 @@ def callers(
     name: str = typer.Argument(..., help="symbol name to find callers of"),
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
-    depth: int = typer.Option(1, "--depth", min=1, help="hop depth; 1 = direct callers, >1 = callers-of-callers"),
+    depth: int = typer.Option(
+        1,
+        "--depth",
+        min=1,
+        help="hop depth; 1 = direct callers, >1 = callers-of-callers",
+    ),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
     """Who calls a symbol? Exact call-graph lookup (--depth for multi-hop)."""
@@ -399,8 +461,10 @@ def classify(
     if json_out:
         print(json.dumps({"query": query, "class": qc, **BUDGETS[qc]}))
         return
-    console.print(f"[bold]{query}[/bold] -> [green]{qc}[/green] "
-                  f"(top_k={BUDGETS[qc]['top_k']}, budget={BUDGETS[qc]['tokens']} tokens)")
+    console.print(
+        f"[bold]{query}[/bold] -> [green]{qc}[/green] "
+        f"(top_k={BUDGETS[qc]['top_k']}, budget={BUDGETS[qc]['tokens']} tokens)"
+    )
 
 
 @app.command()
@@ -416,7 +480,7 @@ def get(
     ev = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).get(unit_id)
     db.close()
     if ev is None:
-        console.print("[yellow]unit not found[/yellow]", file=sys.stderr)
+        error_console.print("[yellow]unit not found[/yellow]")
         raise typer.Exit(1)
     if json_out:
         print(json.dumps(ev, ensure_ascii=False, indent=2))
@@ -432,7 +496,9 @@ def get(
 
 @app.command()
 def mcp(
-    root: Optional[Path] = typer.Option(None, "--root", help="project root (default: auto-discover)"),
+    root: Optional[Path] = typer.Option(
+        None, "--root", help="project root (default: auto-discover)"
+    ),
 ):
     """Run the MCP server over stdio for agent harnesses."""
     from .mcp_server import serve
@@ -475,7 +541,9 @@ def doctor(root: Path = typer.Option(".", help="project root")):
         try:
             emb = create_embedder(cfg.embedding)
             emb.embed_query("probe")
-            console.print(f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({emb.dimension}d)")
+            console.print(
+                f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({emb.dimension}d)"
+            )
         except Exception as exc:
             ok = False
             console.print(f"[bold]embedding:[/bold] [red]FAILED — {exc}[/red]")

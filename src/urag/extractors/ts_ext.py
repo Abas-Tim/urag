@@ -7,7 +7,15 @@ import tree_sitter_typescript as tsts
 import tree_sitter_javascript as tsjs
 
 from ..models import Unit, UNIT_KIND_SYMBOL
-from .base import ByteIndexedSource, Extractor, MAX_SUMMARY_CHARS, collapse_ws, leading_comments, valid_aliases, walk_calls
+from .base import (
+    ByteIndexedSource,
+    Extractor,
+    MAX_SUMMARY_CHARS,
+    collapse_ws,
+    leading_comments,
+    valid_aliases,
+    walk_calls,
+)
 
 _FUNCTION_TYPES = {
     "function_declaration",
@@ -89,23 +97,43 @@ class TsExtractor(Extractor):
         while stack:
             cur = stack.pop()
             if cur.type == "import_statement":
-                clause = next((c for c in cur.named_children if c.type == "import_clause"), None)
+                clause = next(
+                    (c for c in cur.named_children if c.type == "import_clause"), None
+                )
                 source_node = cur.child_by_field_name("source")
-                mod = source[source_node.start_byte : source_node.end_byte].strip("'\"") if source_node else ""
+                mod = (
+                    source[source_node.start_byte : source_node.end_byte].strip("'\"")
+                    if source_node
+                    else ""
+                )
                 mod = mod.strip("@").replace("/", ".")
                 if clause is None:
                     continue
-                ns = next((c for c in clause.named_children if c.type == "namespace_import"), None)
+                ns = next(
+                    (c for c in clause.named_children if c.type == "namespace_import"),
+                    None,
+                )
                 if ns is not None:
                     name = ns.child_by_field_name("name")
                     if name is None:
-                        name = next((c for c in ns.named_children if c.type == "identifier"), None)
+                        name = next(
+                            (c for c in ns.named_children if c.type == "identifier"),
+                            None,
+                        )
                     if name:
                         out.append((source[name.start_byte : name.end_byte], mod))
                 else:
-                    ident = next((c for c in clause.named_children if c.type == "identifier"), None)
+                    ident = next(
+                        (c for c in clause.named_children if c.type == "identifier"),
+                        None,
+                    )
                     if ident:
-                        out.append((source[ident.start_byte : ident.end_byte], f"{mod}.default"))
+                        out.append(
+                            (
+                                source[ident.start_byte : ident.end_byte],
+                                f"{mod}.default",
+                            )
+                        )
                     for ni in clause.named_children:
                         if ni.type != "named_imports":
                             continue
@@ -114,9 +142,16 @@ class TsExtractor(Extractor):
                                 continue
                             name = spec.child_by_field_name("name")
                             alias = spec.child_by_field_name("alias")
-                            imported = source[name.start_byte : name.end_byte] if name else ""
+                            imported = (
+                                source[name.start_byte : name.end_byte] if name else ""
+                            )
                             if alias:
-                                out.append((source[alias.start_byte : alias.end_byte], f"{mod}.{imported}"))
+                                out.append(
+                                    (
+                                        source[alias.start_byte : alias.end_byte],
+                                        f"{mod}.{imported}",
+                                    )
+                                )
                             elif imported:
                                 out.append((imported, f"{mod}.{imported}"))
             stack.extend(reversed(cur.named_children))
@@ -137,19 +172,42 @@ class TsExtractor(Extractor):
                 units.append(self._func(child, source, lines, prefix))
             elif t in ("class_declaration", "abstract_class_declaration"):
                 self._class(child, source, lines, prefix, units)
-            elif t in ("interface_declaration", "type_alias_declaration", "enum_declaration"):
+            elif t in (
+                "interface_declaration",
+                "type_alias_declaration",
+                "enum_declaration",
+            ):
                 units.append(self._type(child, source, lines, prefix))
+                if t == "interface_declaration":
+                    body = child.child_by_field_name("body")
+                    if body:
+                        qualname = _name_of(child, source)
+                        if prefix:
+                            qualname = f"{prefix}.{qualname}"
+                        for member in body.named_children:
+                            if member.type in (
+                                "method_signature",
+                                "abstract_method_signature",
+                            ):
+                                units.append(
+                                    self._func(member, source, lines, qualname)
+                                )
             elif t in ("import_statement", "import_from_statement"):
                 units.append(self._import(child, source))
             elif t == "export_statement":
                 decl = child.named_children[-1] if child.named_children else None
-                if decl and decl.type in _FUNCTION_TYPES | _TYPE_TYPES:
+                if decl and decl.type in _FUNCTION_TYPES | _TYPE_TYPES | {
+                    "lexical_declaration"
+                }:
                     self._walk(child, source, rel_path, lines, prefix, units)
             elif t == "lexical_declaration":
                 for v in child.named_children:
                     if v.type == "variable_declarator":
                         val = v.child_by_field_name("value")
-                        if val and val.type in ("arrow_function", "function_expression"):
+                        if val and val.type in (
+                            "arrow_function",
+                            "function_expression",
+                        ):
                             units.append(self._func(v, source, lines, prefix))
 
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
@@ -157,14 +215,19 @@ class TsExtractor(Extractor):
         body = n.child_by_field_name("body")
         sig_text = source[n.start_byte : (body.start_byte if body else n.end_byte)]
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
-        doc = leading_comments(lines, sl, marker="//") or leading_comments(lines, sl, marker="/*")
+        doc = leading_comments(lines, sl, marker="//") or leading_comments(
+            lines, sl, marker="/*"
+        )
         params = n.child_by_field_name("parameters")
         concepts = self._identifiers(n, source, 12)
         qualname = f"{prefix}.{name}" if prefix else name
         return Unit(
             file_id=0,
             kind=UNIT_KIND_SYMBOL,
-            unit_type="method" if n.type == "method_definition" else "function",
+            unit_type="method"
+            if n.type
+            in ("method_definition", "abstract_method_signature", "method_signature")
+            else "function",
             name=name,
             qualname=qualname,
             signature=collapse_ws(sig_text),
@@ -178,12 +241,16 @@ class TsExtractor(Extractor):
             byte_end=n.end_byte,
         )
 
-    def _class(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
+    def _class(
+        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
+    ) -> None:
         name = _name_of(n, source)
         body = n.child_by_field_name("body")
         sig_text = source[n.start_byte : (body.start_byte if body else n.end_byte)]
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
-        doc = leading_comments(lines, sl, marker="//") or leading_comments(lines, sl, marker="/*")
+        doc = leading_comments(lines, sl, marker="//") or leading_comments(
+            lines, sl, marker="/*"
+        )
         qualname = f"{prefix}.{name}" if prefix else name
         bases: list[str] = []
         for f in ("extends_clause", "class_heritage", "implements_clause"):
@@ -211,7 +278,11 @@ class TsExtractor(Extractor):
         )
         if body:
             for m in body.named_children:
-                if m.type in ("method_definition", "abstract_method_signature", "property_signature"):
+                if m.type in (
+                    "method_definition",
+                    "abstract_method_signature",
+                    "property_signature",
+                ):
                     units.append(self._func(m, source, lines, qualname))
                 elif m.type == "class_static_block":
                     continue
@@ -219,7 +290,9 @@ class TsExtractor(Extractor):
     def _type(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
-        doc = leading_comments(lines, sl, marker="//") or leading_comments(lines, sl, marker="/*")
+        doc = leading_comments(lines, sl, marker="//") or leading_comments(
+            lines, sl, marker="/*"
+        )
         qualname = f"{prefix}.{name}" if prefix else name
         return Unit(
             file_id=0,
@@ -243,7 +316,9 @@ class TsExtractor(Extractor):
         clause = n.child_by_field_name("source")
         mod = source[clause.start_byte : clause.end_byte].strip("'\"") if clause else ""
         names: list[str] = []
-        import_clause = next((c for c in n.named_children if c.type == "import_clause"), None)
+        import_clause = next(
+            (c for c in n.named_children if c.type == "import_clause"), None
+        )
         if import_clause:
             stack: list[Node] = [import_clause]
             while stack:
@@ -253,7 +328,11 @@ class TsExtractor(Extractor):
                     if nm:
                         names.append(source[nm.start_byte : nm.end_byte])
                 elif cur.type == "namespace_import":
-                    names.append(source[cur.start_byte : cur.end_byte].replace("* as", "*").strip())
+                    names.append(
+                        source[cur.start_byte : cur.end_byte]
+                        .replace("* as", "*")
+                        .strip()
+                    )
                 elif cur.type == "named_imports":
                     stack.extend(cur.named_children)
                 else:

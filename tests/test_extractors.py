@@ -35,8 +35,16 @@ class TokenValidator:
     assert v.parent_id is None
 
 
+def test_python_extractor_tolerates_malformed_definitions():
+    src = "def broken(:\n    pass\nclass Broken(\n"
+
+    units = PythonExtractor().extract(src, "broken.py")
+
+    assert any(unit.name == "broken" for unit in units)
+
+
 def test_ts_extractor():
-    src = '''import { readFile } from "fs";
+    src = """import { readFile } from "fs";
 
 /**
  * Validates JWT tokens.
@@ -53,12 +61,15 @@ export class Validator implements TokenValidator {
 
 type Callback = (err: Error | null) => void;
 const helper = (x: number) => x * 2;
-'''
+export const factory = () => new Validator();
+"""
     units = TsExtractor("typescript").extract(src, "auth.ts")
     types = [(u.unit_type, u.name, u.qualname) for u in units]
     assert ("interface", "TokenValidator", "TokenValidator") in types
+    assert ("method", "validate", "TokenValidator.validate") in types
     assert ("class", "Validator", "Validator") in types
     assert ("method", "validate", "Validator.validate") in types
+    assert ("function", "factory", "factory") in types
     assert any(t[1] == "readFile" for t in types)
     v = next(u for u in units if u.qualname == "TokenValidator")
     assert "JWT" in v.summary

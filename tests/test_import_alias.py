@@ -9,7 +9,13 @@ from urag.db import Database
 from urag.retrieve import Retriever
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
-from urag.extractors.native_ext import GoExtractor, RustExtractor, CSharpExtractor, CExtractor, JavaExtractor
+from urag.extractors.native_ext import (
+    GoExtractor,
+    RustExtractor,
+    CSharpExtractor,
+    CExtractor,
+    JavaExtractor,
+)
 from urag.models import SourceFile
 
 
@@ -45,37 +51,51 @@ def test_ts_aliases():
 
 
 def test_go_rust_csharp_aliases():
-    assert _aliases(GoExtractor(), 'import hw "myproj/helpers"') == {"hw": "myproj.helpers"}
-    assert _aliases(RustExtractor(), "use core::auth::validate as check;") == {"check": "core::auth::validate"}
-    assert _aliases(CSharpExtractor(), "using Log = Common.Logging;") == {"Log": "Common.Logging"}
-    assert _aliases(CExtractor("c"), '#include <stdio.h>') == {}
-    assert _aliases(JavaExtractor(), "import com.x.Y;") == {}
+    assert _aliases(GoExtractor(), 'import hw "myproj/helpers"') == {
+        "hw": "myproj.helpers"
+    }
+    assert _aliases(RustExtractor(), "use core::auth::validate as check;") == {
+        "check": "core::auth::validate"
+    }
+    assert _aliases(RustExtractor(), "pub use crate::foo::{Bar as Baz, Qux};") == {
+        "Baz": "crate::foo::Bar"
+    }
+    assert _aliases(CSharpExtractor(), "using Log = Common.Logging;") == {
+        "Log": "Common.Logging"
+    }
+    assert _aliases(CExtractor("c"), "#include <stdio.h>") == {}
+    assert _aliases(
+        JavaExtractor(), "import com.x.Y;\nimport static com.x.Util.foo;"
+    ) == {
+        "Y": "com.x.Y",
+        "foo": "com.x.Util.foo",
+    }
 
 
 # ---------------------------------------------------------------------------
 # end-to-end resolution on an indexed file set
 # ---------------------------------------------------------------------------
 
-SRC_APP = '''import os.path as opath
+SRC_APP = """import os.path as opath
 
 def is_file(path):
     return opath.exists(path)
-'''
+"""
 
-SRC_APP2 = '''from core.http import fetch
+SRC_APP2 = """from core.http import fetch
 
 def get_user():
     return fetch("/user")
-'''
+"""
 
-SRC_SHADOW = '''from core.http import fetch
+SRC_SHADOW = """from core.http import fetch
 
 def fetch(url):
     return url
 
 def local_call():
     return fetch("/local")
-'''
+"""
 
 
 def _index(db: Database, src: str, path: str):
@@ -87,7 +107,11 @@ def _index(db: Database, src: str, path: str):
     edges = []
     for cs in ext.collect_calls(src):
         for u in units:
-            if u.id is not None and u.byte_start <= cs.byte_start <= u.byte_end and u.unit_type in ("function", "method"):
+            if (
+                u.id is not None
+                and u.byte_start <= cs.byte_start <= u.byte_end
+                and u.unit_type in ("function", "method")
+            ):
                 edges.append((u.id, cs.callee, cs.callee_full, cs.line))
     db.replace_call_edges(fid, edges)
     db.replace_import_aliases(fid, ext.collect_import_aliases(src))
@@ -163,7 +187,11 @@ def test_indexer_populates_aliases(tmp_path):
     cfg = load_config(tmp_path)
     db = Database(cfg.db_path, cfg.embedding.dimension)
     src = "import os.path as opath\n\ndef f():\n    return opath.exists('x')\n"
-    fid = db.upsert_file(SourceFile(path="m.py", kind="source", language="python", size=len(src), mtime=1))
+    fid = db.upsert_file(
+        SourceFile(
+            path="m.py", kind="source", language="python", size=len(src), mtime=1
+        )
+    )
     db.replace_units(fid, PythonExtractor().extract(src, "m.py"))
     db.replace_import_aliases(fid, PythonExtractor().collect_import_aliases(src))
     row = db.conn.execute(

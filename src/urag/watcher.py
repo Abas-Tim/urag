@@ -18,10 +18,17 @@ GIT_DIR_NAME = ".git"
 
 
 class _Handler(FileSystemEventHandler):
-    def __init__(self, indexer: Indexer, debounce: float = DEBOUNCE_SECONDS, log=None):
+    def __init__(
+        self,
+        indexer: Indexer,
+        debounce: float = DEBOUNCE_SECONDS,
+        log=None,
+        project_root: Path | None = None,
+    ):
         self.indexer = indexer
         self.debounce = debounce
         self.log = log or print
+        self.project_root = project_root.resolve() if project_root else None
         self._pending: set[str] = set()
         self._lock = threading.Lock()
         self._flush_lock = threading.Lock()
@@ -29,15 +36,27 @@ class _Handler(FileSystemEventHandler):
 
     def _ignore(self, path: str) -> bool:
         parts = Path(path).parts
-        return UURAG_DIR_NAME in parts or GIT_DIR_NAME in parts
+        if UURAG_DIR_NAME in parts or GIT_DIR_NAME in parts:
+            return True
+        if self.project_root:
+            try:
+                Path(path).resolve().relative_to(self.project_root)
+            except ValueError:
+                return True
+        return False
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         if event.is_directory and event.event_type in ("modified", "closed"):
             return
-        if self._ignore(event.src_path):
+        paths = [event.src_path]
+        dest_path = getattr(event, "dest_path", None)
+        if dest_path:
+            paths.append(dest_path)
+        paths = [path for path in paths if not self._ignore(path)]
+        if not paths:
             return
         with self._lock:
-            self._pending.add(event.src_path)
+            self._pending.update(paths)
             if self._timer:
                 self._timer.cancel()
             self._timer = threading.Timer(self.debounce, self._flush)
@@ -55,13 +74,21 @@ class _Handler(FileSystemEventHandler):
             try:
                 stats = self.indexer.index_paths(Path(p) for p in paths)
                 if stats["changed"] or stats["deleted"]:
-                    self.log(f"re-indexed {stats['changed']} changed, {stats['deleted']} deleted")
+                    self.log(
+                        f"re-indexed {stats['changed']} changed, {stats['deleted']} deleted"
+                    )
             except Exception as exc:  # keep the daemon alive
                 self.log(f"index error: {exc}")
 
+    def index_all(self):
+        with self._flush_lock:
+            return self.indexer.index_all()
 
-def run_watch(cfg: Config, indexer: Indexer, rescan_minutes: float = 0, log=print) -> None:
-    handler = _Handler(indexer, log=log)
+
+def run_watch(
+    cfg: Config, indexer: Indexer, rescan_minutes: float = 0, log=print
+) -> None:
+    handler = _Handler(indexer, log=log, project_root=cfg.project_root)
     observer = Observer()
     observer.schedule(handler, str(cfg.project_root), recursive=True)
     observer.start()
@@ -69,9 +96,16 @@ def run_watch(cfg: Config, indexer: Indexer, rescan_minutes: float = 0, log=prin
     last_rescan = time.monotonic()
     try:
         while True:
-            if rescan_minutes > 0 and time.monotonic() - last_rescan > rescan_minutes * 60:
-                indexer.index_all()
-                last_rescan = time.monotonic()
+            if (
+                rescan_minutes > 0
+                and time.monotonic() - last_rescan > rescan_minutes * 60
+            ):
+                try:
+                    handler.index_all()
+                except Exception as exc:
+                    log(f"rescan error: {exc}")
+                finally:
+                    last_rescan = time.monotonic()
             time.sleep(1)
     except KeyboardInterrupt:
         pass

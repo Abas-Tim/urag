@@ -10,9 +10,16 @@ MAX_SUMMARY_CHARS = 220
 
 
 class ByteIndexedSource(str):
+    _utf8: bytes
+
+    def __new__(cls, value: str):
+        source = super().__new__(cls, value)
+        source._utf8 = value.encode("utf-8")
+        return source
+
     def __getitem__(self, key):
         if isinstance(key, slice) and key.step in (None, 1):
-            return bytes(self.encode("utf-8")[key]).decode("utf-8", errors="replace")
+            return self._utf8[key].decode("utf-8", errors="replace")
         return super().__getitem__(key)
 
 
@@ -47,12 +54,22 @@ def valid_aliases(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
     out: dict[str, str] = {}
     for alias, target in pairs:
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias) and target and alias not in out:
+        if (
+            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias)
+            and target
+            and alias not in out
+        ):
             out[alias] = target
     return list(out.items())
 
 
-def walk_calls(node, source: str, call_types: set[str], out: list[CallSite], fn_field: str = "function") -> None:
+def walk_calls(
+    node,
+    source: str,
+    call_types: set[str],
+    out: list[CallSite],
+    fn_field: str = "function",
+) -> list[CallSite]:
     """Generic call collector: finds call nodes and reads the callee chain."""
     stack: list = [node]
     while stack:

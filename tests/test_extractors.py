@@ -3,6 +3,13 @@
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
 from urag.extractors.markdown_ext import MarkdownExtractor
+from urag.extractors.base import ByteIndexedSource
+
+
+def test_byte_indexed_source_uses_utf8_byte_ranges():
+    source = ByteIndexedSource("éclair")
+
+    assert source[0:2] == "é"
 
 
 def test_python_extractor():
@@ -97,3 +104,12 @@ Deep dive here.
     assert units[1].name == "## Design"
     assert "signing key" in units[1].summary
     assert units[1].qualname == "#README.md#Design"
+
+
+def test_markdown_offsets_include_multibyte_lines():
+    src = "# Café\n\nRésumé\n"
+
+    unit = MarkdownExtractor().extract(src, "README.md")[0]
+
+    assert unit.byte_start == 0
+    assert unit.byte_end == len(src.encode("utf-8"))

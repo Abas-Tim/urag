@@ -65,8 +65,12 @@ def test_hybrid_promotes_exact_symbol_matches_over_dense_noise(tmp_path: Path):
 
 
 def test_dense_and_hybrid_search_use_indexed_vectors(tmp_path: Path):
-    (tmp_path / "auth.py").write_text("def validate():\n    return True\n", encoding="utf-8")
-    (tmp_path / "other.py").write_text("def unrelated():\n    return True\n", encoding="utf-8")
+    (tmp_path / "auth.py").write_text(
+        "def validate():\n    return True\n", encoding="utf-8"
+    )
+    (tmp_path / "other.py").write_text(
+        "def unrelated():\n    return True\n", encoding="utf-8"
+    )
     cfg = load_config(tmp_path)
     cfg.embedding.dimension = 2
     embedder = _StaticEmbedder()
@@ -77,6 +81,27 @@ def test_dense_and_hybrid_search_use_indexed_vectors(tmp_path: Path):
         hybrid = Retriever(cfg, db, embedder).search("auth", mode="hybrid")
         assert dense.results[0].file_path == "auth.py"
         assert hybrid.results[0].file_path == "auth.py"
+    finally:
+        db.close()
+
+
+def test_dense_search_hydrates_results_without_per_row_lookup(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "auth.py").write_text(
+        "def validate():\n    return True\n", encoding="utf-8"
+    )
+    cfg = load_config(tmp_path)
+    cfg.embedding.dimension = 2
+    embedder = _StaticEmbedder()
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    Indexer(cfg, db, embedder).index_all()
+    try:
+        monkeypatch.setattr(
+            db, "unit_by_id", lambda _unit_id: (_ for _ in ()).throw(AssertionError)
+        )
+        result = db.dense_search([1.0, 0.0], limit=1)
+        assert result[0][1] == "auth.py"
     finally:
         db.close()
 

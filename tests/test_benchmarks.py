@@ -1,5 +1,6 @@
 """Tests for the call-graph benchmark suites (transitive + import-alias)."""
 
+import json
 from pathlib import Path
 import shutil
 
@@ -15,13 +16,19 @@ from urag.eval import (
     aggregate,
     autogen_alias_questions,
     autogen_transitive_questions,
+    load_questions,
     scan_import_aliases,
     transitive_caller_ids,
 )
 from urag.indexer import Indexer
 from urag.embed import NoopEmbedder
 
-FIXTURE = Path(__file__).resolve().parents[1] / "benchmarks" / "fixtures" / "callgraph_fixture"
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "benchmarks"
+    / "fixtures"
+    / "callgraph_fixture"
+)
 
 
 @pytest.fixture(scope="module")
@@ -36,10 +43,9 @@ def fdb(tmp_path_factory):
     db = Database(cfg.db_path, cfg.embedding.dimension)
     try:
         Indexer(cfg, db, NoopEmbedder()).index_all()
-    except RuntimeError:
-        pass  # embeddings skipped; call-graph tests don't need them
-    yield db
-    db.close()
+        yield db
+    finally:
+        db.close()
 
 
 def test_scan_python_aliases():
@@ -60,13 +66,18 @@ def test_scan_ts_aliases():
 
 
 def test_scan_go_csharp_aliases():
-    assert scan_import_aliases('import hw "myproj/helpers"', "go") == {"hw": "myproj.helpers"}
-    assert scan_import_aliases("using Log = Common.Logging;", "csharp") == {"Log": "Common.Logging"}
+    assert scan_import_aliases('import hw "myproj/helpers"', "go") == {
+        "hw": "myproj.helpers"
+    }
+    assert scan_import_aliases("using Log = Common.Logging;", "csharp") == {
+        "Log": "Common.Logging"
+    }
 
 
 def _unit_id(db, name):
     row = db.conn.execute(
-        "SELECT u.id FROM units u WHERE u.name = ? ORDER BY u.start_line LIMIT 1", (name,)
+        "SELECT u.id FROM units u WHERE u.name = ? ORDER BY u.start_line LIMIT 1",
+        (name,),
     ).fetchone()
     assert row, f"unit {name} not indexed"
     return row["id"]
@@ -105,7 +116,10 @@ def test_autogen_alias_python(fdb):
     assert exists[0].gold_unit_ids == [_unit_id(fdb, "is_file")]
     fetch = [q for q in qs if q.target == "core.http.fetch"]
     assert len(fetch) == 1
-    assert set(fetch[0].gold_unit_ids) == {_unit_id(fdb, "get_user"), _unit_id(fdb, "get_item")}
+    assert set(fetch[0].gold_unit_ids) == {
+        _unit_id(fdb, "get_user"),
+        _unit_id(fdb, "get_item"),
+    }
     # fully-qualified target also matches the non-aliased last-segment caller
     validate = [q for q in qs if q.target == "core.auth.validate"]
     assert validate[0].gold_unit_ids == [_unit_id(fdb, "login")]
@@ -149,9 +163,17 @@ def test_metrics_indirect_none_for_non_transitive():
     assert aggregate([m])["indirect_recall"] == 0.0
 
 
-def test_question_round_trip():
-    q = Question(query="q", gold_unit_ids=[1], label="transitive", target="stop", depth=3, gold_hops={1: 2})
-    d = q.to_dict()
-    assert d["target"] == "stop"
-    assert d["depth"] == 3
-    assert d["gold_hops"] == {"1": 2}
+def test_question_round_trip(tmp_path):
+    q = Question(
+        query="q",
+        gold_unit_ids=[1],
+        gold_file="m.py",
+        label="transitive",
+        target="stop",
+        depth=3,
+        gold_hops={1: 2},
+    )
+    path = tmp_path / "questions.jsonl"
+    path.write_text(json.dumps(q.to_dict()) + "\n", encoding="utf-8")
+
+    assert load_questions(path) == [q]

@@ -1,12 +1,12 @@
 """Tests for the eval harness (autogen, gold resolution, metrics, chunk mapping)."""
 
 from pathlib import Path
-import tempfile
 
 import pytest
 
 from urag.config import load_config
 from urag.db import Database
+from urag.embed import NoopEmbedder
 from urag.eval import (
     Hit,
     OracleBaseline,
@@ -22,14 +22,12 @@ from urag.eval import (
     load_questions,
     resolve_question,
 )
-from urag.extractors.python_ext import PythonExtractor
-from urag.models import SourceFile
+from urag.indexer import Indexer
 
 
 @pytest.fixture
 def db(tmp_path: Path):
     cfg = load_config(tmp_path)
-    db = Database(cfg.db_path, cfg.embedding.dimension)
     src = '''"""Mod."""
 
 def alpha(x: int) -> int:
@@ -40,34 +38,26 @@ class Beta:
     def go(self):
         return alpha(1)
 '''
-    units = PythonExtractor().extract(src, "m.py")
-    f = SourceFile(
-        path="m.py", kind="source", language="python", size=len(src), mtime=1
-    )
-    fid = db.upsert_file(f)
-    db.replace_units(fid, units)
-    edges = []
-    for c in PythonExtractor().collect_calls(src):
-        for u in units:
-            if (
-                u.id is not None
-                and u.byte_start <= c.byte_start <= u.byte_end
-                and u.unit_type in ("function", "method")
-            ):
-                edges.append((u.id, c.callee, c.callee_full, c.line))
-    db.replace_call_edges(fid, edges)
-    yield db
-    db.close()
+    (tmp_path / "m.py").write_text(src, encoding="utf-8")
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        yield db
+    finally:
+        db.close()
 
 
 def test_autogen_and_resolve(db):
     qs = autogen_questions(db, 2)
-    assert qs, "expected autogen questions"
+    assert {q.label for q in qs} == {"definition", "call"}
     for q in qs:
         rq = resolve_question(db, q)
         assert rq.gold_unit_ids, q
         if rq.label == "definition":
             assert rq.gold_file == "m.py"
+        else:
+            assert rq.target == "alpha"
+            assert rq.query == "what calls alpha"
 
 
 def test_callers_gold(db):
@@ -190,4 +180,4 @@ def test_chunk_unit_at(db):
 
     methods = ChunkBaseline._unit_at
     u, _, _ = db.unit_by_id(1)
-    assert methods(db, "m.py", u.byte_start) is not None
+    assert methods(db, "m.py", u.byte_start) == u.id

@@ -40,7 +40,9 @@ def test_python_extractor_tolerates_malformed_definitions():
 
     units = PythonExtractor().extract(src, "broken.py")
 
-    assert any(unit.name == "broken" for unit in units)
+    assert [(unit.unit_type, unit.name) for unit in units] == [("function", "broken")]
+    assert units[0].byte_start == 0
+    assert units[0].byte_end == len("def broken(:\n    pass".encode("utf-8"))
 
 
 def test_ts_extractor():

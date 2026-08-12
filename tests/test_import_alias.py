@@ -6,6 +6,8 @@ import pytest
 
 from urag.config import load_config
 from urag.db import Database
+from urag.embed import NoopEmbedder
+from urag.indexer import Indexer
 from urag.retrieve import Retriever
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
@@ -16,7 +18,6 @@ from urag.extractors.native_ext import (
     CExtractor,
     JavaExtractor,
 )
-from urag.models import SourceFile
 
 
 def _aliases(ext, src):
@@ -98,34 +99,21 @@ def local_call():
 """
 
 
-def _index(db: Database, src: str, path: str):
-    ext = PythonExtractor()
-    units = ext.extract(src, path)
-    f = SourceFile(path=path, kind="source", language="python", size=len(src), mtime=1)
-    fid = db.upsert_file(f)
-    db.replace_units(fid, units)
-    edges = []
-    for cs in ext.collect_calls(src):
-        for u in units:
-            if (
-                u.id is not None
-                and u.byte_start <= cs.byte_start <= u.byte_end
-                and u.unit_type in ("function", "method")
-            ):
-                edges.append((u.id, cs.callee, cs.callee_full, cs.line))
-    db.replace_call_edges(fid, edges)
-    db.replace_import_aliases(fid, ext.collect_import_aliases(src))
-
-
 @pytest.fixture
 def db(tmp_path: Path):
     cfg = load_config(tmp_path)
     db = Database(cfg.db_path, cfg.embedding.dimension)
-    _index(db, SRC_APP, "app.py")
-    _index(db, SRC_APP2, "api.py")
-    _index(db, SRC_SHADOW, "shadow.py")
-    yield db
-    db.close()
+    for path, source in (
+        ("app.py", SRC_APP),
+        ("api.py", SRC_APP2),
+        ("shadow.py", SRC_SHADOW),
+    ):
+        (tmp_path / path).write_text(source, encoding="utf-8")
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        yield db
+    finally:
+        db.close()
 
 
 def _name(db, unit_id):
@@ -173,10 +161,7 @@ def test_no_false_positive_on_bare_call(db):
 
 def test_search_callers_carries_resolution(db, tmp_path):
     cfg = load_config(tmp_path)
-    r = Retriever.__new__(Retriever)
-    r.db = db
-    r.git = None
-    r._enrich = lambda results: None
+    r = Retriever(cfg, db, NoopEmbedder())
     result = r.search_callers("os.path.exists")
     assert result.results[0].resolved_target == "os.path"
     d = result.to_dict()
@@ -187,15 +172,10 @@ def test_indexer_populates_aliases(tmp_path):
     cfg = load_config(tmp_path)
     db = Database(cfg.db_path, cfg.embedding.dimension)
     src = "import os.path as opath\n\ndef f():\n    return opath.exists('x')\n"
-    fid = db.upsert_file(
-        SourceFile(
-            path="m.py", kind="source", language="python", size=len(src), mtime=1
-        )
-    )
-    db.replace_units(fid, PythonExtractor().extract(src, "m.py"))
-    db.replace_import_aliases(fid, PythonExtractor().collect_import_aliases(src))
-    row = db.conn.execute(
-        "SELECT alias, target FROM import_aliases WHERE file_id = ?", (fid,)
-    ).fetchone()
-    assert dict(row) == {"alias": "opath", "target": "os.path"}
-    db.close()
+    (tmp_path / "m.py").write_text(src, encoding="utf-8")
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        row = db.conn.execute("SELECT alias, target FROM import_aliases").fetchone()
+        assert dict(row) == {"alias": "opath", "target": "os.path"}
+    finally:
+        db.close()

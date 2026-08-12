@@ -16,6 +16,9 @@ class MarkdownExtractor(Extractor):
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
         lines = source.splitlines(keepends=True)
+        offsets = [0]
+        for line in lines:
+            offsets.append(offsets[-1] + len(line.encode("utf-8")))
         headings: list[tuple[int, int, str, str]] = []
         in_fence = False
         for i, line in enumerate(lines):
@@ -31,31 +34,64 @@ class MarkdownExtractor(Extractor):
                 title = m.group(2).strip()
                 headings.append((i, level, title, "#" * level + " " + title))
         if not headings:
-            return self._chunk(lines, 0, len(lines), f"#{rel_path}", "", rel_path)
+            return self._chunk(
+                lines, offsets, 0, len(lines), f"#{rel_path}", "", rel_path
+            )
         units: list[Unit] = []
         if headings[0][0] > 0:
             units.extend(
-                self._chunk(lines, 0, headings[0][0], f"#{rel_path}#preamble", "", rel_path)
+                self._chunk(
+                    lines,
+                    offsets,
+                    0,
+                    headings[0][0],
+                    f"#{rel_path}#preamble",
+                    "",
+                    rel_path,
+                )
             )
         for idx, (line_no, level, title, full) in enumerate(headings):
             end = headings[idx + 1][0] if idx + 1 < len(headings) else len(lines)
-            chunks = self._chunk(lines, line_no, end, f"#{rel_path}#{title}", full, rel_path)
+            chunks = self._chunk(
+                lines, offsets, line_no, end, f"#{rel_path}#{title}", full, rel_path
+            )
             units.extend(chunks)
         return units
 
-    def _chunk(self, lines: list[str], start: int, end: int, qualname: str, title: str, rel_path: str) -> list[Unit]:
+    def _chunk(
+        self,
+        lines: list[str],
+        offsets: list[int],
+        start: int,
+        end: int,
+        qualname: str,
+        title: str,
+        rel_path: str,
+    ) -> list[Unit]:
         content = lines[start:end]
         out: list[Unit] = []
         if not content:
             return out
         for i in range(0, len(content), MAX_CHUNK_LINES):
             seg = content[i : i + MAX_CHUNK_LINES]
-            out.append(self._make(lines, start + i, start + i + len(seg), qualname, title, seg, rel_path))
+            out.append(
+                self._make(
+                    lines,
+                    offsets,
+                    start + i,
+                    start + i + len(seg),
+                    qualname,
+                    title,
+                    seg,
+                    rel_path,
+                )
+            )
         return out
 
     def _make(
         self,
         lines: list[str],
+        offsets: list[int],
         start: int,
         end: int,
         qualname: str,
@@ -76,6 +112,6 @@ class MarkdownExtractor(Extractor):
             concepts="",
             start_line=start + 1,
             end_line=end,
-            byte_start=sum(len(l.encode("utf-8")) for l in lines[:start]),
-            byte_end=sum(len(l.encode("utf-8")) for l in lines[:end]),
+            byte_start=offsets[start],
+            byte_end=offsets[end],
         )

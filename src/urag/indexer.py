@@ -28,7 +28,9 @@ def _noop(msg: str) -> None:
 
 
 class Indexer:
-    def __init__(self, cfg: Config, db: Database, embedder: Embedder, progress: Progress = _noop):
+    def __init__(
+        self, cfg: Config, db: Database, embedder: Embedder, progress: Progress = _noop
+    ):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
@@ -37,6 +39,7 @@ class Indexer:
         self._specs = self._build_specs()
         self.git = Git(self._root)
         self._head = self.git.head()
+        self._changed_symbol_names: set[str] = set()
         fingerprint = self.cfg.embedding.fingerprint()
         if self.db.get_meta("embedding_fingerprint") != fingerprint:
             self.db.clear_embeddings()
@@ -49,9 +52,16 @@ class Indexer:
         if not self.cfg.index.ignore_gitignore:
             gi = self._root / ".gitignore"
             if gi.exists():
-                specs.append(pathspec.PathSpec.from_lines("gitwildmatch", gi.read_text(encoding="utf-8", errors="replace").splitlines()))
+                specs.append(
+                    pathspec.PathSpec.from_lines(
+                        "gitwildmatch",
+                        gi.read_text(encoding="utf-8", errors="replace").splitlines(),
+                    )
+                )
         excludes = list(self.cfg.index.exclude)
-        specs.append(pathspec.PathSpec.from_lines("gitwildmatch", [f"{e}/" for e in excludes]))
+        specs.append(
+            pathspec.PathSpec.from_lines("gitwildmatch", [f"{e}/" for e in excludes])
+        )
         return specs
 
     def _is_excluded(self, rel: str) -> bool:
@@ -95,6 +105,7 @@ class Indexer:
     def index_all(self) -> dict:
         start = time.monotonic()
         self._head = self.git.head(refresh=True)
+        self._changed_symbol_names.clear()
         files = self.discover()
         known = self.db.known_paths()
         current = {f.relative_to(self._root).as_posix() for f in files}
@@ -107,9 +118,12 @@ class Indexer:
             self.db.delete_files(sorted(deleted))
             self.progress(f"removed {len(deleted)} deleted file(s)")
         changed = [f for f in files if self._needs_reindex(f)]
+        changed_file_ids: set[int] = set()
         for p in changed:
-            self._index_file(p)
-        self._resolve_call_edges()
+            file_id = self._index_file(p)
+            if file_id is not None:
+                changed_file_ids.add(file_id)
+        self._resolve_call_edges(changed_file_ids)
         self._embed_missing()
         if self._head:
             self.db.set_meta("last_commit", self._head)
@@ -124,6 +138,7 @@ class Indexer:
     def index_paths(self, paths: Iterable[Path]) -> dict:
         """Incremental re-index of specific paths (watcher)."""
         self._head = self.git.head(refresh=True)
+        self._changed_symbol_names.clear()
         changed: list[Path] = []
         deleted: list[str] = []
         for p in paths:
@@ -151,9 +166,12 @@ class Indexer:
                 changed.append(p)
         if deleted:
             self.db.delete_files(deleted)
+        changed_file_ids: set[int] = set()
         for p in changed:
-            self._index_file(p)
-        self._resolve_call_edges()
+            file_id = self._index_file(p)
+            if file_id is not None:
+                changed_file_ids.add(file_id)
+        self._resolve_call_edges(changed_file_ids)
         self._embed_missing()
         if self._head:
             self.db.set_meta("last_commit", self._head)
@@ -179,20 +197,40 @@ class Indexer:
             return False
         return digest != row["sha256"]
 
-    def _index_file(self, p: Path) -> None:
+    def _index_file(self, p: Path) -> int | None:
         rel = p.relative_to(self._root).as_posix()
         try:
             st = p.stat()
             data = p.read_bytes()
         except OSError:
-            return
-        lang, kind = language_for_path(p)
+            return None
+        result = language_for_path(p)
+        if result is None:
+            return None
+        lang, kind = result
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             text = data.decode("utf-8", errors="replace")
         extractor = get_extractor(lang)
         units = extractor.extract(text, rel) if extractor else []
+        existing = self.db.conn.execute(
+            "SELECT id FROM files WHERE path = ?", (rel,)
+        ).fetchone()
+        if existing:
+            old_units = self.db.conn.execute(
+                "SELECT name, qualname FROM units WHERE file_id = ? AND kind = 'symbol' AND unit_type != 'import'",
+                (existing["id"],),
+            ).fetchall()
+            for unit in old_units:
+                self._changed_symbol_names.update(
+                    value for value in (unit["name"], unit["qualname"]) if value
+                )
+        for unit in units:
+            if unit.is_symbol and unit.unit_type != "import":
+                self._changed_symbol_names.update(
+                    value for value in (unit.name, unit.qualname) if value
+                )
         f = SourceFile(
             path=rel,
             kind=kind,
@@ -217,6 +255,7 @@ class Indexer:
             self.db.conn.rollback()
             raise
         self.progress(f"  {rel}: {len(units)} units")
+        return file_id
 
     # ---------- embeddings ----------
 
@@ -242,7 +281,9 @@ class Indexer:
         )
         path_rows = dict(self.db.conn.execute("SELECT id, path FROM files").fetchall())
         parent_rows = dict(
-            self.db.conn.execute("SELECT id, qualname FROM units WHERE qualname != ''").fetchall()
+            self.db.conn.execute(
+                "SELECT id, qualname FROM units WHERE qualname != ''"
+            ).fetchall()
         )
         n = 0
         for i in range(0, len(units), BATCH):
@@ -253,7 +294,9 @@ class Indexer:
                     for part in (
                         f"file: {path_rows.get(u.file_id, '')}",
                         f"language: {lang_rows.get(u.file_id, '')}",
-                        f"parent: {parent_rows.get(u.parent_id, '')}" if u.parent_id else "",
+                        f"parent: {parent_rows.get(u.parent_id, '')}"
+                        if u.parent_id
+                        else "",
                         u.retrieval_key,
                     )
                     if part
@@ -267,7 +310,9 @@ class Indexer:
                 )
             rows = []
             for u, v in zip(batch, vecs):
-                if len(v) != self.embedder.dimension or not all(math.isfinite(x) for x in v):
+                if len(v) != self.embedder.dimension or not all(
+                    math.isfinite(x) for x in v
+                ):
                     raise RuntimeError(f"invalid embedding for unit {u.id}")
                 rows.append((u.id, lang_rows.get(u.file_id, ""), u.kind, v))
             self.db.store_embeddings(rows)
@@ -277,10 +322,16 @@ class Indexer:
 
     # ---------- call graph ----------
 
-    def _map_calls(self, units: list[Unit], calls: list) -> list[tuple[int, str, str, int]]:
+    def _map_calls(
+        self, units: list[Unit], calls: list
+    ) -> list[tuple[int, str, str, int]]:
         """Map call sites to the innermost enclosing symbol unit."""
         funcs = sorted(
-            [u for u in units if u.is_symbol and u.unit_type != "import" and u.id is not None],
+            [
+                u
+                for u in units
+                if u.is_symbol and u.unit_type != "import" and u.id is not None
+            ],
             key=lambda u: u.byte_start,
         )
         edges: list[tuple[int, str, str, int]] = []
@@ -291,11 +342,14 @@ class Indexer:
             idx = bisect.bisect_right(starts, c.byte_start) - 1
             if idx >= 0:
                 caller = funcs[idx]
-                if caller.byte_start <= c.byte_start < caller.byte_end:
+                if (
+                    caller.id is not None
+                    and caller.byte_start <= c.byte_start < caller.byte_end
+                ):
                     edges.append((caller.id, c.callee, c.callee_full, c.line))
         return edges
 
-    def _resolve_call_edges(self) -> None:
+    def _resolve_call_edges(self, changed_file_ids: set[int] | None = None) -> None:
         rows = self.db.conn.execute(
             """
             SELECT u.id, u.file_id, u.name, u.qualname, f.path
@@ -311,7 +365,9 @@ class Indexer:
             by_name.setdefault(row["name"], []).append(row)
             by_qualname.setdefault(row["qualname"], []).append(row)
         aliases: dict[int, dict[str, str]] = {}
-        for row in self.db.conn.execute("SELECT file_id, alias, target FROM import_aliases"):
+        for row in self.db.conn.execute(
+            "SELECT file_id, alias, target FROM import_aliases"
+        ):
             aliases.setdefault(row["file_id"], {})[row["alias"]] = row["target"]
 
         def module_name(path: str) -> str:
@@ -319,7 +375,9 @@ class Indexer:
 
         def resolve(file_id: int, callee: str, full: str) -> int | None:
             local = by_file.get(file_id, [])
-            candidates = [r for r in local if r["name"] == callee or r["qualname"] == full]
+            candidates = [
+                r for r in local if r["name"] == callee or r["qualname"] == full
+            ]
             if len(candidates) == 1:
                 return candidates[0]["id"]
             binding = aliases.get(file_id, {})
@@ -329,7 +387,7 @@ class Indexer:
                     target = imported
                     break
                 if full.startswith(alias + "."):
-                    target = imported + full[len(alias):]
+                    target = imported + full[len(alias) :]
                     break
             if target:
                 qualified = by_qualname.get(target, [])
@@ -339,7 +397,9 @@ class Indexer:
                 if len(parts) == 2:
                     module, symbol = parts
                     qualified = [
-                        r for r in by_name.get(symbol, []) if module_name(r["path"]) == module
+                        r
+                        for r in by_name.get(symbol, [])
+                        if module_name(r["path"]) == module
                     ]
                     if len(qualified) == 1:
                         return qualified[0]["id"]
@@ -348,15 +408,38 @@ class Indexer:
                 return global_matches[0]["id"]
             return None
 
-        for edge in self.db.conn.execute(
-            "SELECT rowid, file_id, callee, callee_full FROM call_edges"
-        ).fetchall():
+        edge_query = "SELECT rowid, file_id, callee, callee_full FROM call_edges"
+        edge_params: list = []
+        if changed_file_ids is not None:
+            clauses = ["callee_unit_id IS NULL"]
+            if changed_file_ids:
+                marks = ",".join("?" for _ in changed_file_ids)
+                clauses.append(f"file_id IN ({marks})")
+                edge_params.extend(changed_file_ids)
+            if self._changed_symbol_names:
+                name_marks = ",".join("?" for _ in self._changed_symbol_names)
+                clauses.extend(
+                    (f"callee IN ({name_marks})", f"callee_full IN ({name_marks})")
+                )
+                clauses.append(
+                    "EXISTS ("
+                    "SELECT 1 FROM import_aliases ia "
+                    "WHERE ia.file_id = call_edges.file_id"
+                    ")"
+                )
+                names = sorted(self._changed_symbol_names)
+                edge_params.extend(names)
+                edge_params.extend(names)
+            edge_query += " WHERE " + " OR ".join(clauses)
+        updates = []
+        for edge in self.db.conn.execute(edge_query, edge_params).fetchall():
             target_id = resolve(edge["file_id"], edge["callee"], edge["callee_full"])
-            self.db.conn.execute(
-                "UPDATE call_edges SET callee_unit_id = ? WHERE rowid = ?",
-                (target_id, edge["rowid"]),
-            )
+            updates.append((target_id, edge["rowid"]))
+        self.db.conn.executemany(
+            "UPDATE call_edges SET callee_unit_id = ? WHERE rowid = ?", updates
+        )
         self.db.conn.commit()
+        self._changed_symbol_names.clear()
 
     # ---------- queries ----------
 

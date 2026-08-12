@@ -507,6 +507,196 @@ def mcp(
 
 
 @app.command()
+def resolve(
+    name: str = typer.Argument(..., help="symbol name or qualified name"),
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Find an exact symbol definition by name."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).resolve(
+            name, limit=top_k or 10
+        )
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print(f"[yellow]no definition found for {name}[/yellow]")
+            return
+        for r in result.results:
+            u = r.unit
+            head = f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
+            if r.stale:
+                head += " [red][stale][/red]"
+            console.print(head)
+            if u.signature:
+                console.print(f"  [cyan]{u.signature}[/cyan]")
+            if u.summary:
+                console.print(f"  {u.summary}")
+    finally:
+        db.close()
+
+
+@app.command()
+def callees(
+    unit_id: int = typer.Argument(..., help="unit id from search results"),
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """List what a unit calls (its call sites)."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).callees(
+            unit_id
+        )
+        if result is None:
+            error_console.print("[yellow]unit not found[/yellow]")
+            raise typer.Exit(1)
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        console.print(
+            f"[bold]{result['qualname'] or result['name']}[/bold] [dim]{result['file']}[/dim]"
+        )
+        if not result["callees"]:
+            console.print("[yellow]no call sites found[/yellow]")
+            return
+        for c in result["callees"]:
+            console.print(
+                f"  calls [green]{c['callee_full'] or c['callee']}[/green] at line {c['line']}"
+            )
+    finally:
+        db.close()
+
+
+@app.command()
+def dependents(
+    target: str = typer.Argument(..., help="module or symbol to find importers of"),
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Find what imports (depends on) a module or symbol."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).dependents(
+            target, limit=top_k or 50
+        )
+        result["count"] = len(result["results"])
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        console.print(f"[bold]{target}[/bold]: {len(result['results'])} dependent(s)")
+        for r in result["results"]:
+            line = f"  {r['path']}"
+            if r.get("alias"):
+                line += f" [dim]as {r['alias']}[/dim]"
+            console.print(line)
+    finally:
+        db.close()
+
+
+@app.command("symbols")
+def symbols_cmd(
+    file: str = typer.Argument(..., help="project-relative file path"),
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """List every indexed unit in a file."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).list_symbols(
+            file
+        )
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print(f"[yellow]no units indexed for {file}[/yellow]")
+            return
+        for r in result.results:
+            u = r.unit
+            console.print(
+                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{u.start_line}-{u.end_line}[/dim]"
+            )
+            if u.signature:
+                console.print(f"  [cyan]{u.signature}[/cyan]")
+    finally:
+        db.close()
+
+
+@app.command("read")
+def read_cmd(
+    path: str = typer.Argument(..., help="project-relative file path"),
+    root: Path = typer.Option(".", help="project root"),
+    start: Optional[int] = typer.Option(None, "--start", help="first line (1-based)"),
+    end: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
+):
+    """Read a file (or a line range) from the project."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).read_file(
+            path, start=start, end=end
+        )
+        if "error" in result:
+            error_console.print(f"[yellow]{result['error']}[/yellow]")
+            raise typer.Exit(1)
+        console.print(
+            f"[bold]{result['path']}[/bold] [dim]lines {result['start_line']}-{result['end_line']} of {result['total_lines']}[/dim]"
+        )
+        console.print(result["span"])
+    finally:
+        db.close()
+
+
+@app.command("recent")
+def recent_cmd(
+    root: Path = typer.Option(".", help="project root"),
+    limit: int = typer.Option(20, "--limit", help="number of commits"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Show recent git changes (branch, working tree, recent commits)."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    db.close()
+    git = Git(cfg.project_root)
+    result = git.recent_changes(limit=limit)
+    if json_out:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"[bold]branch:[/bold] {result['branch']} [dim]@{result['head'][:8] if result['head'] else ''}[/dim]"
+    )
+    w = result["working"]
+    if w["changed"] or w["deleted"] or w["untracked"]:
+        console.print("[bold]working changes:[/bold]")
+        for p in w["changed"]:
+            console.print(f"  [yellow]M[/yellow] {p}")
+        for p in w["deleted"]:
+            console.print(f"  [red]D[/red] {p}")
+        for p in w["untracked"]:
+            console.print(f"  [green]?[/green] {p}")
+    console.print("[bold]recent commits:[/bold]")
+    for c in result["commits"]:
+        console.print(
+            f"  [cyan]{c['short']}[/cyan] {c['subject']} [dim]({len(c['files'])} files)[/dim]"
+        )
+
+
+@app.command()
 def status(root: Path = typer.Option(".", help="project root")):
     """Show index stats."""
     cfg, db = _engine(root)

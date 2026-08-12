@@ -27,14 +27,19 @@ _embedder_cache: dict[str, Embedder] = {}
 
 INSTRUCTIONS = """You are connected to urag, a structure-aware project index.
 
-How to use it efficiently (token-conscious workflow):
-1. `search` with top_k=3-5 first. Results are compact records (signature,
+Token-conscious workflow:
+1. If `status` reports no index, call `init_project` (or `init_project`
+   with embed=false for a fast lexical-only index) before searching.
+2. `search` with top_k=3-5 first. Results are compact records (signature,
    summary, file:line). Prefer `mode=hybrid`; use `lexical` for exact
    symbol/identifier lookups, `dense` for conceptual questions.
-2. Use `fetch_unit` only for the 1-3 most relevant hits to get the exact
-   source span. Never request whole files.
-3. `index_now` re-syncs after files change; `status` shows freshness.
-4. If the project is not indexed yet, call `init_project` first.
+3. Use `fetch_unit` (or `fetch_units` for several ids) only for the 1-3 most
+   relevant hits to get exact source spans. Never request whole files.
+4. Browse files and symbols without search: `list_files`, `list_symbols`,
+   `read_file`, `resolve` (exact definition), `children` (methods of a class).
+5. Ask impact questions precisely: `callers` (who calls X), `callees` (what X
+   calls), `dependents` (what imports X), and `recent_changes` (git state).
+6. `index_now` re-syncs after files change; `status` shows freshness.
 Filter by `language` when you know the stack (python, typescript, javascript).
 """
 
@@ -112,6 +117,31 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
     return packet
 
 
+def _evidence_budget(total: int, count: int) -> int:
+    """Split a total token budget across `count` result packets."""
+    if count <= 1:
+        return total
+    return max(200, total // count)
+
+
+def _unit_meta(db: Database, unit_id: int) -> dict | None:
+    got = db.unit_by_id(unit_id)
+    if not got:
+        return None
+    u, path, commit = got
+    return {
+        "unit_id": unit_id,
+        "name": u.name,
+        "qualname": u.qualname,
+        "type": u.unit_type,
+        "signature": u.signature,
+        "summary": u.summary,
+        "file": path,
+        "lines": [u.start_line, u.end_line],
+        "commit": commit,
+    }
+
+
 def create_server(root: Path | None = None) -> MCPServer:
     project_root = root.resolve() if root is not None else discover_project_root()
     cfg = load_config(project_root)
@@ -153,9 +183,9 @@ def create_server(root: Path | None = None) -> MCPServer:
                     language=language,
                     query_class=query_class,
                 )
+                per_budget = _evidence_budget(result.budget_tokens, len(result.results))
                 packets = [
-                    _packet(r, include_evidence, db, result.budget_tokens)
-                    for r in result.results
+                    _packet(r, include_evidence, db, per_budget) for r in result.results
                 ]
                 return json.dumps(
                     {
@@ -183,11 +213,39 @@ def create_server(root: Path | None = None) -> MCPServer:
     def fetch_unit(unit_id: int) -> str:
         try:
             with _database(cfg) as db:
-                ev = Retriever(cfg, db, _embedder(cfg), git).get(unit_id)
-                return (
-                    json.dumps(ev, ensure_ascii=False)
-                    if ev
-                    else json.dumps({"error": "unit not found"})
+                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                ev = retriever.get(unit_id)
+                if not ev:
+                    return json.dumps({"error": "unit not found"})
+                meta = _unit_meta(db, unit_id) or {}
+                meta.pop("unit_id", None)
+                return json.dumps({**meta, **ev}, ensure_ascii=False)
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="fetch_units",
+        title="Fetch exact source spans for several units",
+        description=(
+            "Batch version of fetch_unit: load exact source spans for a list "
+            "of unit ids in one round-trip. Each entry includes the unit "
+            "metadata, file, lines, span, commit, and a stale flag. Pass "
+            "max_tokens to trim each span to a budget."
+        ),
+    )
+    def fetch_units(unit_ids: list[int], max_tokens: int | None = None) -> str:
+        try:
+            with _database(cfg) as db:
+                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                evs = retriever.get_many(unit_ids, max_tokens=max_tokens)
+                enriched = []
+                for ev in evs:
+                    meta = _unit_meta(db, ev["unit_id"]) or {}
+                    meta.pop("unit_id", None)
+                    enriched.append({**meta, **ev})
+                return json.dumps(
+                    {"count": len(enriched), "results": enriched},
+                    ensure_ascii=False,
                 )
         except IndexUnavailableError as exc:
             return _error_response(exc)
@@ -226,6 +284,184 @@ def create_server(root: Path | None = None) -> MCPServer:
                 )
         except IndexUnavailableError as exc:
             return _error_response(exc)
+
+    @server.tool(
+        name="resolve",
+        title="Find a symbol definition by name",
+        description=(
+            "Fast exact-definition lookup by name or qualified name. Returns "
+            "the units whose name/qualname matches exactly (classes, "
+            "functions, methods, etc.). Prefer this over search for a known "
+            "symbol; use search for fuzzy or conceptual questions."
+        ),
+    )
+    def resolve(name: str, limit: int = 10) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).resolve(
+                    name, limit=limit
+                )
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "query": name,
+                        "mode": "resolve",
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="callees",
+        title="Find what a unit calls",
+        description=(
+            "The inverse of callers: given a unit id, return every call site "
+            "inside that unit (callee, full chain, line). Use to answer 'what "
+            "does X call' / 'what are X's dependencies'."
+        ),
+    )
+    def callees(unit_id: int) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).callees(unit_id)
+                return (
+                    json.dumps(result, ensure_ascii=False)
+                    if result
+                    else json.dumps({"error": "unit not found"})
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="dependents",
+        title="Find what imports a module or symbol",
+        description=(
+            "Dependency lookup: return the files that import the given module "
+            "or symbol (target), matched exactly or by sub-module prefix "
+            "against import bindings and import units. Use for 'what depends "
+            "on X' / 'what would break if I move X'."
+        ),
+    )
+    def dependents(target: str, limit: int = 50) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).dependents(
+                    target, limit=limit
+                )
+                result["count"] = len(result["results"])
+                return json.dumps(result, ensure_ascii=False)
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="children",
+        title="List the members of a unit",
+        description=(
+            "Structural navigation: list the child units of a unit id (e.g. "
+            "the methods of a class). Set include_siblings=true to also "
+            "return sibling units of the same parent."
+        ),
+    )
+    def children(unit_id: int, include_siblings: bool = False) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).children(
+                    unit_id, include_siblings=include_siblings
+                )
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "unit_id": unit_id,
+                        "mode": result.mode,
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="list_files",
+        title="List indexed files",
+        description=(
+            "List all indexed files with language, kind, size, commit, and "
+            "unit count. Optionally filter by language."
+        ),
+    )
+    def list_files(language: str | None = None) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).list_files(
+                    language=language
+                )
+                return json.dumps(result, ensure_ascii=False)
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="list_symbols",
+        title="List symbols in a file",
+        description=(
+            "List every indexed unit (symbols and doc chunks) in a file, with "
+            "signature, summary, and line range. Use to get an overview of a "
+            "file without reading it whole."
+        ),
+    )
+    def list_symbols(file: str) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).list_symbols(file)
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {"file": file, "count": len(packets), "results": packets},
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="read_file",
+        title="Read a file (optionally a line range)",
+        description=(
+            "Read a file (or a line range) by project-relative path. Returns "
+            "the lines as a trimmed span plus the total line count. Prefer "
+            "list_symbols + fetch_unit for symbols; use this for config or "
+            "context around a symbol."
+        ),
+    )
+    def read_file(path: str, start: int | None = None, end: int | None = None) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).read_file(
+                    path, start=start, end=end
+                )
+                return json.dumps(result, ensure_ascii=False)
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="recent_changes",
+        title="Show recent git changes",
+        description=(
+            "Best-effort git state: current branch and HEAD, working-tree "
+            "changes (changed/deleted/untracked), and recent commits with "
+            "their files. Use to understand what changed recently before "
+            "relying on evidence."
+        ),
+    )
+    def recent_changes(limit: int = 20) -> str:
+        result = git.recent_changes(limit=limit)
+        return json.dumps(result, ensure_ascii=False)
 
     @server.tool(
         name="index_now",
@@ -268,12 +504,21 @@ def create_server(root: Path | None = None) -> MCPServer:
                         "last_indexed": s.last_indexed,
                         "provider": cfg.embedding.provider,
                         "model": cfg.embedding.model,
+                        "git": {
+                            "branch": git.current_branch(),
+                            "head": git.head(refresh=True),
+                        },
                     },
                     ensure_ascii=False,
                 )
         except IndexUnavailableError as exc:
             return json.dumps(
-                {"root": str(cfg.project_root), "error": str(exc)},
+                {
+                    "root": str(cfg.project_root),
+                    "error": str(exc),
+                    "next": "call init_project (optionally embed=false for a "
+                    "fast lexical-only index) to build the index",
+                },
                 ensure_ascii=False,
             )
 
@@ -282,21 +527,24 @@ def create_server(root: Path | None = None) -> MCPServer:
         title="Initialize the project index",
         description=(
             "Set up .urag/ config and run a first full index. Call this when "
-            "status reports the index is missing."
+            "status reports the index is missing. Pass embed=false for a fast "
+            "lexical-only index (no model download); you can run index_now "
+            "later with embeddings enabled."
         ),
     )
-    def init_project() -> str:
+    def init_project(embed: bool = True) -> str:
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
         ensure_gitignore(cfg.project_root)
         try:
             with _database(cfg, create=True) as db:
-                indexer = Indexer(cfg, db, _embedder(cfg))
+                indexer = Indexer(cfg, db, _embedder(cfg) if embed else NoopEmbedder())
                 stats = indexer.index_all()
                 s = db.stats()
                 return json.dumps(
                     {
                         "initialized": True,
                         "root": str(cfg.project_root),
+                        "embedding": embed,
                         **stats,
                         "units": s.units,
                         "embedded": s.embedded,
@@ -304,6 +552,17 @@ def create_server(root: Path | None = None) -> MCPServer:
                 )
         except IndexUnavailableError as exc:
             return _error_response(exc)
+
+    @server.resource("urag://unit/{unit_id}")
+    def unit_resource(unit_id: str) -> str:
+        try:
+            with _database(cfg) as db:
+                ev = db.load_evidence(int(unit_id))
+                if not ev or "span" not in ev:
+                    return json.dumps({"error": "unit not found"}, ensure_ascii=False)
+                return ev["span"]
+        except (IndexUnavailableError, ValueError):
+            return json.dumps({"error": "unit not found"}, ensure_ascii=False)
 
     return server
 

@@ -52,11 +52,19 @@ SUPPORTED_LANGUAGES = {
     "cpp": {"ext": (".cpp", ".cc", ".cxx", ".hpp", ".hh"), "kind": "source"},
     "csharp": {"ext": (".cs",), "kind": "source"},
     "markdown": {"ext": (".md", ".markdown", ".mdx"), "kind": "doc"},
+    "json": {"ext": (".json",), "kind": "config"},
+    "yaml": {"ext": (".yaml", ".yml"), "kind": "config"},
+    "toml": {"ext": (".toml",), "kind": "config"},
+    "ini": {"ext": (".ini", ".cfg", ".conf", ".properties"), "kind": "config"},
+    "env": {"ext": (".env",), "kind": "config"},
 }
 
 
 def language_for_path(path: Path) -> tuple[str, str] | None:
     """Return (language, kind) for a file, or None if unsupported."""
+    name = path.name.lower()
+    if name == ".env" or name.startswith(".env."):
+        return "env", "config"
     ext = path.suffix.lower()
     for lang, spec in SUPPORTED_LANGUAGES.items():
         if ext in spec["ext"]:

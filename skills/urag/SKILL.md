@@ -103,21 +103,35 @@ Run the stdio server with:
 urag mcp --root <root>
 ```
 
-The server exposes six tools:
+The server exposes these tools:
 
 - `search(query, top_k?, mode?, language?, include_evidence?, query_class?)`
   returns compact packets with metadata, ranks, provenance, and optional
-  trimmed evidence.
-- `fetch_unit(unit_id)` returns the exact source span, file, line range, and
-  indexed commit; Git projects also receive a stale status.
+  trimmed evidence. The evidence budget is split across results, not applied
+  per result.
+- `fetch_unit(unit_id)` returns the exact source span, file, line range,
+  symbol metadata, indexed commit, and a stale status.
+- `fetch_units(unit_ids[], max_tokens?)` fetches several units in one call.
 - `callers(name, limit?, depth?)` returns direct or multi-hop caller packets.
+- `callees(unit_id)` returns what a unit calls (the inverse of callers).
+- `dependents(target, limit?)` returns the files that import a module/symbol.
+- `resolve(name, limit?)` returns exact symbol definitions by name/qualname.
+- `children(unit_id, include_siblings?)` lists the members of a class/struct.
+- `list_files(language?)` lists indexed files with language and unit counts.
+- `list_symbols(file)` lists every indexed unit in a file.
+- `read_file(path, start?, end?)` reads a file or a line range by path.
+- `recent_changes(limit?)` reports git branch, HEAD, working-tree changes, and
+  recent commits with their files.
 - `index_now()` incrementally re-indexes changed files and reports statistics.
 - `status()` reports the project root, files, units, embeddings, languages,
-  provider, model, and last index time.
-- `init_project()` creates and populates the project index.
+  provider, model, git branch/HEAD, and last index time.
+- `init_project(embed?)` creates and populates the project index. Pass
+  `embed=false` for a fast lexical-only index without a model download.
 
 When using MCP, search with `top_k=3-5`, fetch only the most relevant one to
-three units, and call `index_now` after changes.
+three units, and call `index_now` after changes. Use `resolve` for a known
+symbol, `list_symbols` + `read_file` to browse files, and `callers`/`callees`/
+`dependents` for impact questions.
 
 ## Result Fields
 
@@ -141,7 +155,9 @@ Language-aware extractors cover Python, TypeScript, JavaScript, Go, Rust,
 Java, C, C++, and C#. They index functions, methods, classes or types,
 interfaces, enums, imports, signatures, documentation comments, source spans,
 and call sites according to the language. Markdown is indexed as heading-based
-document chunks.
+document chunks. JSON, YAML, TOML, INI, and `.env` files are indexed as
+`config_key` units with dotted qualnames, so agents can answer "where is this
+setting" and "what env vars exist".
 
 Files are filtered by project `.gitignore`, built-in exclusions, configured
 languages, and a default 1 MB file-size limit.

@@ -6,7 +6,14 @@ from .base import Extractor
 from .python_ext import PythonExtractor
 from .ts_ext import TsExtractor
 from .markdown_ext import MarkdownExtractor
-from .native_ext import GoExtractor, RustExtractor, JavaExtractor, CExtractor, CSharpExtractor
+from .config_ext import ConfigExtractor
+from .native_ext import (
+    GoExtractor,
+    RustExtractor,
+    JavaExtractor,
+    CExtractor,
+    CSharpExtractor,
+)
 
 _REGISTRY: dict[str, Extractor] = {
     "python": PythonExtractor(),
@@ -14,6 +21,11 @@ _REGISTRY: dict[str, Extractor] = {
     "tsx": TsExtractor("tsx"),
     "javascript": TsExtractor("javascript"),
     "markdown": MarkdownExtractor(),
+    "json": ConfigExtractor("json"),
+    "yaml": ConfigExtractor("yaml"),
+    "toml": ConfigExtractor("toml"),
+    "ini": ConfigExtractor("ini"),
+    "env": ConfigExtractor("env"),
     "go": GoExtractor(),
     "rust": RustExtractor(),
     "java": JavaExtractor(),

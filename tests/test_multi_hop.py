@@ -6,11 +6,11 @@ import pytest
 
 from urag.config import load_config
 from urag.db import Database
+from urag.embed import NoopEmbedder
+from urag.indexer import Indexer
 from urag.retrieve import Retriever
-from urag.extractors.python_ext import PythonExtractor
-from urag.models import SourceFile
 
-SRC = '''def a():
+SRC = """def a():
     b()
 
 
@@ -28,35 +28,25 @@ def d():
 
 def e():
     pass
-'''
-
-
-def _index(db: Database, src: str, path: str = "m.py"):
-    units = PythonExtractor().extract(src, path)
-    f = SourceFile(path=path, kind="source", language="python", size=len(src), mtime=1)
-    fid = db.upsert_file(f)
-    db.replace_units(fid, units)
-    edges = []
-    for cs in PythonExtractor().collect_calls(src):
-        for u in units:
-            if u.id is not None and u.byte_start <= cs.byte_start <= u.byte_end and u.unit_type in ("function", "method"):
-                edges.append((u.id, cs.callee, cs.callee_full, cs.line))
-    db.replace_call_edges(fid, edges)
-    return fid
+"""
 
 
 @pytest.fixture
 def db(tmp_path: Path):
     cfg = load_config(tmp_path)
+    (tmp_path / "m.py").write_text(SRC, encoding="utf-8")
     db = Database(cfg.db_path, cfg.embedding.dimension)
-    _index(db, SRC)
-    yield db
-    db.close()
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        yield db
+    finally:
+        db.close()
 
 
 def _id(db, name):
     row = db.conn.execute(
-        "SELECT u.id FROM units u WHERE u.name = ? ORDER BY u.start_line LIMIT 1", (name,)
+        "SELECT u.id FROM units u WHERE u.name = ? ORDER BY u.start_line LIMIT 1",
+        (name,),
     ).fetchone()
     assert row, name
     return row["id"]
@@ -103,9 +93,7 @@ def test_limit(db):
 
 def test_search_transitive(db, tmp_path):
     cfg = load_config(tmp_path)
-    retriever = Retriever.__new__(Retriever)
-    retriever.db = db
-    retriever.git = None
+    retriever = Retriever(cfg, db, NoopEmbedder())
     result = retriever.search_transitive("c", depth=2)
     by_name = {r.unit.name: r.hop for r in result.results}
     assert by_name == {"b": 1, "d": 1, "a": 2, "c": 2}
@@ -117,12 +105,8 @@ def test_search_transitive(db, tmp_path):
     assert all(r.hop == 0 for r in direct.results)
 
 
-def test_search_transitive_noop_without_enrich(tmp_path, db):
-    # search_transitive works without git/embedder (enrich must tolerate None)
+def test_search_transitive_without_embedding(tmp_path, db):
     cfg = load_config(tmp_path)
-    retriever = Retriever.__new__(Retriever)
-    retriever.db = db
-    retriever.git = None
-    retriever._enrich = lambda results: None
+    retriever = Retriever(cfg, db, NoopEmbedder())
     result = retriever.search_transitive("c", depth=2, limit=2)
     assert len(result.results) == 2

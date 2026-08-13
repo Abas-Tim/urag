@@ -286,6 +286,19 @@ next `urag index` re-embeds everything with the new model; pass `--reindex`
 to do it in the same run, or `--keep-cache` to keep the old model's files.
 Mismatched `model`/`dimension` pairs are rejected at startup.
 
+Common local model choices:
+
+| Model | Dimensions | Storage per unit | Model RAM | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `BAAI/bge-small-en-v1.5` | 384 | ~9 KB | ~150 MB | Smallest footprint |
+| `BAAI/bge-base-en-v1.5` (default) | 768 | ~18 KB | ~500 MB | Best quality per byte |
+| `BAAI/bge-large-en-v1.5` | 1024 | ~24 KB | ~1.3 GB | Roughly base quality, 3x cost |
+| `intfloat/multilingual-e5-small` | 384 | ~9 KB | ~150 MB | Multilingual codebases |
+
+Vector storage scales linearly with the dimension; model RAM is a one-time
+cost independent of repository size. Because urag retrieval is hybrid, the
+lexical index carries exact-name queries even when dense quality is modest.
+
 ## Git Freshness
 
 For Git repositories, indexed files record the commit used at indexing time.
@@ -395,7 +408,8 @@ performance guarantees.
 | urag repository | `urag-hybrid` | 57 | 0.316 | 0.077 | 0.252 | 4.38 ms | 134.7 |
 
 The checked-in reports predate the current index-lifecycle and retrieval-quality
-changes; rerun the benchmark before comparing new results. The transitive system
+changes and the default embedding model change (bge-small 384d to bge-base
+768d); rerun the benchmark before comparing new results. The transitive system
 reached `indirect_recall=1.000` on the synthetic
 fixture and `0.440` on the checked-in urag repository report. In the current
 evaluation harness, unit recall is fractional across the gold units for a

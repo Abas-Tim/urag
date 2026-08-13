@@ -44,33 +44,45 @@ class Git:
             self._head = out.strip() if out else None
         return self._head
 
-    def changed_paths(self) -> tuple[set[str], set[str]]:
-        """(changed, deleted) repo-relative paths vs the working tree."""
-        out = self._run(["status", "--porcelain", "-z", "--untracked-files=all"])
+    def _parse_status_porcelain(self, out: str) -> tuple[set[str], set[str], set[str]]:
+        """(changed, deleted, untracked) from `git status --porcelain -z`.
+
+        Entries are `XY <path>` NUL-terminated; renames carry the target
+        path as an extra NUL-separated field."""
         changed: set[str] = set()
         deleted: set[str] = set()
+        untracked: set[str] = set()
         if not out:
-            return changed, deleted
+            return changed, deleted, untracked
         entries = out.split("\0")
         i = 0
         while i < len(entries):
-            if len(entries[i]) < 2:
-                i += 1
+            e = entries[i]
+            i += 1
+            if len(e) < 4:
                 continue
-            x, y = entries[i][0], entries[i][1]
-            i += 1
-            if i >= len(entries):
-                break
-            path = entries[i]
-            i += 1
-            if x == "R":
-                if i < len(entries):  # rename: old path already consumed, next is new
-                    i += 1
-            rel = Path(path).as_posix()
-            if x in ("D", "U") or (x == " " and y == "D"):
-                deleted.add(rel)
-            else:
-                changed.add(rel)
+            x, y = e[0], e[1]
+            path = Path(e[3:]).as_posix()
+            if x == "R" and i < len(entries):
+                target = Path(entries[i]).as_posix()
+                i += 1
+                if target:
+                    changed.add(target)
+                deleted.add(path)
+                continue
+            if x == "?":
+                untracked.add(path)
+            elif x in ("D", "U") or (x == " " and y == "D"):
+                deleted.add(path)
+            elif path:
+                changed.add(path)
+        return changed, deleted, untracked
+
+    def changed_paths(self) -> tuple[set[str], set[str]]:
+        """(changed, deleted) repo-relative paths vs the working tree."""
+        changed, deleted, _ = self._parse_status_porcelain(
+            self._run(["status", "--porcelain", "-z", "--untracked-files=all"]) or ""
+        )
         return changed, deleted
 
     def changed_since(self, commit: str) -> set[str]:
@@ -79,3 +91,50 @@ class Git:
         if not out:
             return set()
         return {Path(p).as_posix() for p in out.split("\0") if p}
+
+    def current_branch(self) -> str | None:
+        out = self._run(["rev-parse", "--abbrev-ref", "HEAD"])
+        return out.strip() if out else None
+
+    def recent_changes(self, limit: int = 20) -> dict:
+        """Working-tree changes plus recent commit file lists (best-effort)."""
+        result: dict = {
+            "branch": self.current_branch(),
+            "head": self.head(refresh=True),
+            "working": {"changed": [], "deleted": [], "untracked": []},
+            "commits": [],
+        }
+        if not self.is_repo():
+            return result
+        changed, deleted, untracked = self._parse_status_porcelain(
+            self._run(["status", "--porcelain", "-z", "--untracked-files=all"]) or ""
+        )
+        result["working"]["deleted"] = sorted(deleted)
+        result["working"]["changed"] = sorted(changed)
+        result["working"]["untracked"] = sorted(untracked)
+        log = self._run(
+            [
+                "log",
+                f"-n{max(1, limit)}",
+                "--name-only",
+                "--pretty=format:%H%x1f%h%x1f%s%x1f%cI",
+            ]
+        )
+        if log:
+            for block in log.split("\n\n"):
+                lines = [l for l in block.splitlines() if l]
+                if not lines:
+                    continue
+                fields = lines[0].split("\x1f")
+                if len(fields) < 4:
+                    continue
+                result["commits"].append(
+                    {
+                        "commit": fields[0],
+                        "short": fields[1],
+                        "subject": fields[2],
+                        "date": fields[3],
+                        "files": [Path(l).as_posix() for l in lines[1:]],
+                    }
+                )
+        return result

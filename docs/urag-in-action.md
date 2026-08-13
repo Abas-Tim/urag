@@ -92,8 +92,8 @@ exclusions, a 1 MB maximum file size, and the local embedding provider:
 ```toml
 [embedding]
 provider = "local"
-model = "BAAI/bge-small-en-v1.5"
-dimension = 384
+model = "BAAI/bge-base-en-v1.5"
+dimension = 768
 
 [index]
 languages = ["python", "typescript", "tsx", "javascript", "go", "rust", "java", "c", "cpp", "csharp", "markdown"]
@@ -103,6 +103,13 @@ exclude = [".urag", ".git", "node_modules", "dist", "build", ".venv"]
 The default local model is downloaded on first use and cached locally. An
 OpenAI-compatible HTTP embedding provider or an existing lexical-only index
 can be configured instead.
+
+The embedding model can be changed with `urag embed`, which validates the
+model/dimension pair, clears old vectors from the index, removes the old
+model from the local cache, and updates `urag.toml`. A subsequent
+`urag index` re-embeds all units with the new model (`--reindex` does both in
+one run). Changing the model changes the embedding fingerprint; the indexer
+treats the index as unembedded and rebuilds the dense vectors from scratch.
 
 ## 2. File Discovery
 
@@ -251,7 +258,7 @@ The configured embedder creates one vector per unit. Vectors are stored in
 the sqlite-vec `vec_units` virtual table with the unit id, language, kind, and
 embedding dimensions.
 
-New embeddings are generated in batches of 64. The local default is a 384
+New embeddings are generated in batches of 64. The local default is a 768
 dimensional FastEmbed/ONNX model. HTTP-compatible providers use the same
 storage path after returning vectors.
 
@@ -575,7 +582,7 @@ retrieval ranks, Git provenance, stale state, and call-site details.
   },
   "last_indexed": "2026-08-05T23:00:00+00:00",
   "provider": "local",
-  "model": "BAAI/bge-small-en-v1.5"
+  "model": "BAAI/bge-base-en-v1.5"
 }
 ```
 

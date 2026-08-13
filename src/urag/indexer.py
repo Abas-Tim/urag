@@ -219,7 +219,8 @@ class Indexer:
         ).fetchone()
         if existing:
             old_units = self.db.conn.execute(
-                "SELECT name, qualname FROM units WHERE file_id = ? AND kind = 'symbol' AND unit_type != 'import'",
+                "SELECT name, qualname FROM units WHERE file_id = ? AND kind = 'symbol' "
+                "AND unit_type NOT IN ('import', 'config_key')",
                 (existing["id"],),
             ).fetchall()
             for unit in old_units:
@@ -227,7 +228,7 @@ class Indexer:
                     value for value in (unit["name"], unit["qualname"]) if value
                 )
         for unit in units:
-            if unit.is_symbol and unit.unit_type != "import":
+            if unit.is_symbol and unit.unit_type not in ("import", "config_key"):
                 self._changed_symbol_names.update(
                     value for value in (unit.name, unit.qualname) if value
                 )
@@ -330,7 +331,9 @@ class Indexer:
             [
                 u
                 for u in units
-                if u.is_symbol and u.unit_type != "import" and u.id is not None
+                if u.is_symbol
+                and u.unit_type not in ("import", "config_key")
+                and u.id is not None
             ],
             key=lambda u: u.byte_start,
         )
@@ -354,7 +357,7 @@ class Indexer:
             """
             SELECT u.id, u.file_id, u.name, u.qualname, f.path
             FROM units u JOIN files f ON f.id = u.file_id
-            WHERE u.kind = 'symbol' AND u.unit_type != 'import'
+            WHERE u.kind = 'symbol' AND u.unit_type NOT IN ('import', 'config_key')
             """
         ).fetchall()
         by_file: dict[int, list] = {}

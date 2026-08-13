@@ -36,12 +36,16 @@ class SearchResult:
             "class": self.query_class,
             "budget_tokens": self.budget_tokens,
             "count": len(self.results),
-            "results": [r.to_dict(include_evidence=include_evidence) for r in self.results],
+            "results": [
+                r.to_dict(include_evidence=include_evidence) for r in self.results
+            ],
         }
 
 
 def _rrf_scores(
-    lists: list[list[tuple[int, float]]], k: int = 60, weights: list[float] | None = None
+    lists: list[list[tuple[int, float]]],
+    k: int = 60,
+    weights: list[float] | None = None,
 ) -> dict[int, dict[str, int | float]]:
     """Fuse ranked unit-id lists via RRF. Each list: (unit_id, rank_weight)."""
     fused: dict[int, dict[str, int | float]] = {}
@@ -57,15 +61,29 @@ def _rrf_scores(
     return fused
 
 
-def _exact_symbol_ids(
-    query: str, lexical: list[tuple[Unit, str, float]]
-) -> set[int]:
+def _exact_symbol_ids(query: str, lexical: list[tuple[Unit, str, float]]) -> set[int]:
     tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_.$:]*", query)
     identifiers: set[str] = set()
-    definition_query = bool(re.search(r"\b(where\s+is|defined|definition)\b", query, re.IGNORECASE))
+    definition_query = bool(
+        re.search(r"\b(where\s+is|defined|definition)\b", query, re.IGNORECASE)
+    )
     stop_words = {
-        "a", "an", "are", "at", "defined", "definition", "for", "in", "is", "of",
-        "on", "the", "to", "was", "were", "where",
+        "a",
+        "an",
+        "are",
+        "at",
+        "defined",
+        "definition",
+        "for",
+        "in",
+        "is",
+        "of",
+        "on",
+        "the",
+        "to",
+        "was",
+        "were",
+        "where",
     }
     for token in tokens:
         symbol_like = (
@@ -76,10 +94,14 @@ def _exact_symbol_ids(
             or (token[:1].isupper() and any(c.islower() for c in token[1:]))
             or (len(token) > 1 and token.isupper())
         )
-        if not symbol_like and not (definition_query and token.casefold() not in stop_words):
+        if not symbol_like and not (
+            definition_query and token.casefold() not in stop_words
+        ):
             continue
         identifiers.add(token.casefold())
-        identifiers.update(part.casefold() for part in re.split(r"[.:$]+", token) if part)
+        identifiers.update(
+            part.casefold() for part in re.split(r"[.:$]+", token) if part
+        )
 
     if not identifiers:
         return set()
@@ -123,7 +145,9 @@ def fit_evidence(span: str, max_tokens: int) -> str:
 
 
 class Retriever:
-    def __init__(self, cfg: Config, db: Database, embedder: Embedder, git: Git | None = None):
+    def __init__(
+        self, cfg: Config, db: Database, embedder: Embedder, git: Git | None = None
+    ):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
@@ -140,7 +164,9 @@ class Retriever:
         return self._stale_cache[commit]
 
     def _stale_map(self, paths: list[str]) -> dict[str, bool]:
-        root = getattr(getattr(self, "cfg", None), "project_root", self.db.db_path.parent.parent)
+        root = getattr(
+            getattr(self, "cfg", None), "project_root", self.db.db_path.parent.parent
+        )
         stale: dict[str, bool] = {}
         for path in paths:
             row = self.db.conn.execute(
@@ -161,7 +187,9 @@ class Retriever:
             if row["sha256"]:
                 stale[path] = digest != row["sha256"]
             else:
-                stale[path] = bool(row["commit"] and path in self._changed_since(row["commit"]))
+                stale[path] = bool(
+                    row["commit"] and path in self._changed_since(row["commit"])
+                )
         return stale
 
     def search(
@@ -186,20 +214,34 @@ class Retriever:
         if qc == "impact":
             target = self._impact_symbol(query)
             if target:
-                depth = 3 if any(
-                    phrase in query.lower()
-                    for phrase in ("what breaks", "blast radius", "downstream", "transitive")
-                ) else 1
+                depth = (
+                    3
+                    if any(
+                        phrase in query.lower()
+                        for phrase in (
+                            "what breaks",
+                            "blast radius",
+                            "downstream",
+                            "transitive",
+                        )
+                    )
+                    else 1
+                )
                 hits = (
-                    self.db.transitive_callers(target, max_depth=depth, limit=max(k * 3, 10))
+                    self.db.transitive_callers(
+                        target, max_depth=depth, limit=max(k * 3, 10)
+                    )
                     if depth > 1
                     else self.db.callers(target, limit=max(k * 3, 10))
                 )
                 if hits:
                     results = [
                         RetrievedUnit(
-                            h["unit"], h["path"], score=1.0,
-                            caller_of=h["callee_full"] or target, call_line=h["line"],
+                            h["unit"],
+                            h["path"],
+                            score=1.0,
+                            caller_of=h["callee_full"] or target,
+                            call_line=h["line"],
                             hop=h.get("hop", 0),
                             resolved_target=h.get("resolved_target", ""),
                         )
@@ -212,7 +254,9 @@ class Retriever:
             mode = MODE_BY_CLASS.get(qc, mode)
         mode = mode or MODE_BY_CLASS.get(qc, "hybrid")
         if mode == "lexical":
-            hits = self.db.lexical_search(query, rc.lexical_candidates, language, exact=qc == "symbol")
+            hits = self.db.lexical_search(
+                query, rc.lexical_candidates, language, exact=qc == "symbol"
+            )
             results = [RetrievedUnit(u, path, score=s) for u, path, s in hits]
         elif mode == "dense":
             try:
@@ -239,7 +283,9 @@ class Retriever:
             for uid in exact_ids:
                 if uid in fused:
                     fused[uid]["rrf"] = float(fused[uid]["rrf"]) + exact_bonus
-            ranked = sorted(fused.items(), key=lambda kv: kv[1]["rrf"], reverse=True)[: max(k * 4, 20)]
+            ranked = sorted(fused.items(), key=lambda kv: kv[1]["rrf"], reverse=True)[
+                : max(k * 4, 20)
+            ]
             by_id = {u.id: (u, p) for u, p, _s in lexical}
             for u, p, _s in dense:
                 by_id.setdefault(u.id, (u, p))
@@ -261,7 +307,9 @@ class Retriever:
         self._enrich(results, stale)
         return SearchResult(results, mode, query, qc, budget)
 
-    def _limit_results(self, results: list[RetrievedUnit], limit: int) -> list[RetrievedUnit]:
+    def _limit_results(
+        self, results: list[RetrievedUnit], limit: int
+    ) -> list[RetrievedUnit]:
         per_file: dict[str, int] = {}
         seen: set[tuple[str, str, str]] = set()
         selected: list[RetrievedUnit] = []
@@ -277,7 +325,9 @@ class Retriever:
                 break
         return selected
 
-    def _enrich(self, results: list[RetrievedUnit], stale: dict[str, bool] | None = None) -> None:
+    def _enrich(
+        self, results: list[RetrievedUnit], stale: dict[str, bool] | None = None
+    ) -> None:
         """Attach commit + staleness to results."""
         stale = stale or self._stale_map([r.file_path for r in results])
         for r in results:
@@ -292,23 +342,81 @@ class Retriever:
         """Extract the target symbol from an impact query like 'what calls X'."""
         import re
 
-        keywords = ("calls", "uses", "breaks", "imports", "invokes", "depends", "references", "touches")
+        keywords = (
+            "calls",
+            "uses",
+            "breaks",
+            "imports",
+            "invokes",
+            "depends",
+            "references",
+            "touches",
+        )
         stop = {
-            "what", "who", "this", "the", "a", "an", "of", "for", "on", "in", "if", "when",
-            "where", "which", "that", "why", "does", "is", "are", "it", "its", "they", "to", "i",
-            "method", "function", "class", "interface", "code", "files", "file",
+            "what",
+            "who",
+            "this",
+            "the",
+            "a",
+            "an",
+            "of",
+            "for",
+            "on",
+            "in",
+            "if",
+            "when",
+            "where",
+            "which",
+            "that",
+            "why",
+            "does",
+            "is",
+            "are",
+            "it",
+            "its",
+            "they",
+            "to",
+            "i",
+            "method",
+            "function",
+            "class",
+            "interface",
+            "code",
+            "files",
+            "file",
         }
         verbs = {
-            "change", "changes", "changing", "changed", "modify", "edit", "editing",
-            "remove", "removing", "removed", "add", "adding", "break", "breaking",
-            "alter", "updating", "update", "call", "use", "import", "run", "invoke",
+            "change",
+            "changes",
+            "changing",
+            "changed",
+            "modify",
+            "edit",
+            "editing",
+            "remove",
+            "removing",
+            "removed",
+            "add",
+            "adding",
+            "break",
+            "breaking",
+            "alter",
+            "updating",
+            "update",
+            "call",
+            "use",
+            "import",
+            "run",
+            "invoke",
         }
         words = query.split()
         for i, w in enumerate(words):
             base = w.strip("?.,()[]")
             if base.lower() in keywords:
                 for j in range(i + 1, len(words)):
-                    m = re.match(r"[A-Za-z_][A-Za-z0-9_.$:]*", words[j].strip("?.,()[]"))
+                    m = re.match(
+                        r"[A-Za-z_][A-Za-z0-9_.$:]*", words[j].strip("?.,()[]")
+                    )
                     tok = m.group(0) if m else ""
                     if tok.lower() not in stop and tok.lower() not in verbs:
                         return tok
@@ -322,8 +430,11 @@ class Retriever:
         hits = self.db.callers(name, limit=limit)
         results = [
             RetrievedUnit(
-                h["unit"], h["path"], score=1.0,
-                caller_of=h["callee_full"] or name, call_line=h["line"],
+                h["unit"],
+                h["path"],
+                score=1.0,
+                caller_of=h["callee_full"] or name,
+                call_line=h["line"],
                 resolved_target=h.get("resolved_target", ""),
             )
             for h in hits
@@ -332,20 +443,31 @@ class Retriever:
         budget = self._impact_budget()
         return SearchResult(results, "calls", f"callers of {name}", "impact", budget)
 
-    def search_transitive(self, name: str, depth: int = 3, limit: int = 20) -> SearchResult:
+    def search_transitive(
+        self, name: str, depth: int = 3, limit: int = 20
+    ) -> SearchResult:
         """Multi-hop call-graph lookup: callers-of-callers up to `depth` hops."""
         hits = self.db.transitive_callers(name, max_depth=depth, limit=limit)
         results = [
             RetrievedUnit(
-                h["unit"], h["path"], score=1.0,
-                caller_of=h["callee_full"] or name, call_line=h["line"],
+                h["unit"],
+                h["path"],
+                score=1.0,
+                caller_of=h["callee_full"] or name,
+                call_line=h["line"],
                 hop=h.get("hop", 0),
             )
             for h in hits
         ]
         self._enrich(results)
         budget = self._impact_budget()
-        return SearchResult(results, "calls", f"transitive callers of {name} (depth {depth})", "impact", budget)
+        return SearchResult(
+            results,
+            "calls",
+            f"transitive callers of {name} (depth {depth})",
+            "impact",
+            budget,
+        )
 
     def _impact_budget(self) -> int:
         maximum = getattr(getattr(self, "cfg", None), "retrieval", None)
@@ -359,3 +481,145 @@ class Retriever:
         if ev and ev.get("file"):
             ev["stale"] = self._stale_map([ev["file"]]).get(ev["file"], True)
         return ev
+
+    def get_many(
+        self, unit_ids: list[int], max_tokens: int | None = None
+    ) -> list[dict]:
+        """Batch evidence fetch for multiple unit ids, with optional trimming."""
+        out: list[dict] = []
+        for unit_id in unit_ids:
+            ev = self.db.load_evidence(unit_id)
+            if not ev:
+                continue
+            ev["stale"] = self._stale_map([ev["file"]]).get(ev["file"], True)
+            if max_tokens and "span" in ev:
+                ev["span"] = fit_evidence(ev["span"], max_tokens)
+            out.append(ev)
+        return out
+
+    # ---------- navigation ----------
+
+    def _retrieved(
+        self,
+        unit: Unit,
+        path: str,
+        commit: str = "",
+        stale: dict[str, bool] | None = None,
+    ) -> RetrievedUnit:
+        stale = stale or self._stale_map([path])
+        return RetrievedUnit(
+            unit,
+            path,
+            score=1.0,
+            commit=commit,
+            stale=stale.get(path, False),
+        )
+
+    def resolve(self, name: str, limit: int = 10) -> SearchResult:
+        """Exact definition lookup (fast path vs hybrid search)."""
+        hits = self.db.resolve_units(name, limit=limit)
+        results = [self._retrieved(u, p, c) for u, p, c in hits]
+        stale = self._stale_map([r.file_path for r in results])
+        for r in results:
+            r.stale = stale.get(r.file_path, False)
+        return SearchResult(results, "resolve", f"definition of {name}", "symbol", 800)
+
+    def children(self, unit_id: int, include_siblings: bool = False) -> SearchResult:
+        units = (
+            self.db.siblings_of(unit_id)
+            if include_siblings
+            else self.db.children_of(unit_id)
+        )
+        results: list[RetrievedUnit] = []
+        paths: dict[int, str] = {}
+        for u in units:
+            row = self.db.conn.execute(
+                'SELECT f.path, f."commit" FROM files f WHERE f.id = ?', (u.file_id,)
+            ).fetchone()
+            paths[u.id] = row["path"] if row else ""
+            results.append(
+                RetrievedUnit(
+                    u,
+                    paths[u.id],
+                    score=1.0,
+                    commit=row["commit"] if row else "",
+                )
+            )
+        stale = self._stale_map([r.file_path for r in results])
+        for r in results:
+            r.stale = stale.get(r.file_path, False)
+        mode = "siblings" if include_siblings else "children"
+        return SearchResult(results, mode, f"unit {unit_id}", "local", 2000)
+
+    def callees(self, unit_id: int) -> dict | None:
+        got = self.db.unit_by_id(unit_id)
+        if not got:
+            return None
+        unit, path, commit = got
+        calls = self.db.callees(unit_id)
+        return {
+            "unit_id": unit_id,
+            "name": unit.name,
+            "qualname": unit.qualname,
+            "type": unit.unit_type,
+            "file": path,
+            "lines": [unit.start_line, unit.end_line],
+            "commit": commit,
+            "stale": self._stale_map([path]).get(path, False),
+            "callees": calls,
+        }
+
+    def dependents(self, target: str, limit: int = 50) -> dict:
+        return {
+            "target": target,
+            "count": 0,
+            "results": self.db.importers(target, limit=limit),
+        }
+
+    def list_files(self, language: str | None = None) -> dict:
+        files = self.db.file_list(language=language)
+        return {"count": len(files), "files": files}
+
+    def list_symbols(self, path: str) -> SearchResult:
+        units = self.db.units_by_file_path(path)
+        commit = ""
+        fr = self.db.file_by_path(path)
+        if fr:
+            commit = fr["commit"]
+        results = [self._retrieved(u, path, commit) for u in units]
+        stale = self._stale_map([path])
+        for r in results:
+            r.stale = stale.get(path, False)
+        return SearchResult(results, "symbols", f"symbols in {path}", "local", 2000)
+
+    def read_file(
+        self, path: str, start: int | None = None, end: int | None = None
+    ) -> dict:
+        root = self.cfg.project_root
+        p = Path(path)
+        if not p.is_absolute():
+            p = root / p
+        p = p.resolve()
+        try:
+            p.relative_to(root.resolve())
+        except ValueError:
+            return {"error": f"path outside project root: {path}"}
+        if not p.is_file():
+            return {"error": f"file not found: {path}"}
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return {"error": f"cannot read {path}: {exc}"}
+        lines = text.splitlines()
+        total = len(lines)
+        start = max(1, start or 1)
+        end = min(total, end or total)
+        span = "\n".join(lines[start - 1 : end])
+        return {
+            "path": path,
+            "language": p.suffix.lstrip("."),
+            "total_lines": total,
+            "start_line": start,
+            "end_line": end,
+            "span": span,
+        }

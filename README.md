@@ -137,11 +137,18 @@ run a periodic full rescan with `--rescan 30`.
 | `urag index` | Incrementally index new, changed, and deleted files |
 | `urag watch` | Keep the index updated while files change |
 | `urag search QUERY` | Search symbols and documentation |
+| `urag resolve NAME` | Find an exact symbol definition by name |
 | `urag callers NAME` | Find direct callers of a symbol |
 | `urag callers NAME --depth 3` | Find callers through multiple call-graph hops |
+| `urag callees UNIT_ID` | List what a unit calls (its call sites) |
+| `urag dependents NAME` | Find what imports (depends on) a module or symbol |
+| `urag symbols FILE` | List every indexed unit in a file |
+| `urag read FILE` | Read a file (or a `--start`/`--end` line range) |
 | `urag get UNIT_ID` | Fetch the exact source span for a search result |
+| `urag recent` | Show recent git changes (branch, working tree, commits) |
 | `urag status` | Show file, unit, embedding, language, and database statistics |
 | `urag doctor` | Check index and embedding health |
+| `urag embed` | Show or change the embedding model/provider |
 | `urag classify QUERY` | Show the query class and selected context budget |
 | `urag eval` | Compare retrieval systems on a question set |
 | `urag mcp` | Run the MCP server over stdio |
@@ -225,6 +232,11 @@ model.
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh` | Functions, methods, classes, structs, namespaces, includes, calls |
 | C# | `.cs` | Classes, interfaces, structs, records, enums, methods, usings, calls, aliases |
 | Markdown | `.md`, `.markdown`, `.mdx` | Heading-based document chunks and hierarchy |
+| JSON | `.json` | `config_key` units with dotted qualnames |
+| YAML | `.yaml`, `.yml` | `config_key` units with dotted qualnames |
+| TOML | `.toml` | `config_key` units with dotted qualnames |
+| INI | `.ini`, `.cfg`, `.conf`, `.properties` | `config_key` units with dotted qualnames |
+| Env | `.env`, `.env.*` | `config_key` units for `KEY=value` entries |
 
 Files are filtered by `.gitignore`, built-in exclusions, configured languages,
 and a default maximum size of 1 MB. These settings are configurable in
@@ -237,8 +249,8 @@ The default provider is a local ONNX model through FastEmbed:
 ```toml
 [embedding]
 provider = "local"
-model = "BAAI/bge-small-en-v1.5"
-dimension = 384
+model = "BAAI/bge-base-en-v1.5"
+dimension = 768
 ```
 
 The model is downloaded on first use and cached in `%LOCALAPPDATA%/urag` on
@@ -248,7 +260,7 @@ embedding endpoint is also supported:
 ```toml
 [embedding]
 provider = "http"
-dimension = 384
+dimension = 768
 http_url = "http://localhost:11434/v1"
 http_model = "nomic-embed-text"
 http_api_key = ""
@@ -258,6 +270,21 @@ Keep API keys in the local `.urag/urag.toml` only and do not commit them.
 Projects that already have an index can use `provider = "none"` for
 lexical-only retrieval; dense retrieval and embedding new units require an
 embedding provider.
+
+Switch models without editing the TOML:
+
+```bash
+urag embed                                     # show current embedding config
+urag embed --model BAAI/bge-small-en-v1.5      # switch model (auto-detects dimension)
+urag embed --model BAAI/bge-small-en-v1.5 --reindex
+urag embed --provider http --dimension 768     # switch provider
+```
+
+`urag embed` clears the old model's vectors from the index, removes the old
+model's files from the local cache, and saves the new configuration. The
+next `urag index` re-embeds everything with the new model; pass `--reindex`
+to do it in the same run, or `--keep-cache` to keep the old model's files.
+Mismatched `model`/`dimension` pairs are rejected at startup.
 
 ## Git Freshness
 
@@ -294,15 +321,28 @@ Example generic MCP configuration:
 The server exposes these tools:
 
 - `search`: Search symbols and documentation with compact result packets.
-- `fetch_unit`: Fetch exact source lines for a result id.
+- `fetch_unit`: Fetch exact source lines for a result id (includes metadata).
+- `fetch_units`: Batch-fetch several unit ids in one call.
 - `callers`: Query direct or multi-hop callers.
+- `callees`: List what a unit calls (call sites).
+- `dependents`: Find what imports a module or symbol.
+- `resolve`: Exact symbol definition lookup by name.
+- `children`: List the members (methods) of a class/struct.
+- `list_files`: List indexed files with language and unit counts.
+- `list_symbols`: List every indexed unit in a file.
+- `read_file`: Read a file or a line range by path.
+- `recent_changes`: Report git branch, HEAD, working-tree changes, and recent
+  commits.
 - `index_now`: Incrementally re-index changed files.
-- `status`: Return index statistics and configuration.
-- `init_project`: Create and populate an index for a project.
+- `status`: Return index statistics, config, and git state.
+- `init_project`: Create and populate an index for a project. Pass
+  `embed=false` for a fast lexical-only index.
 
 The intended agent workflow is to search with `top_k=3-5`, fetch exact spans
 only for the most relevant one to three units, and call `index_now` after
-changes.
+changes. Agents can also browse with `list_files`/`list_symbols`/`read_file`,
+resolve known symbols with `resolve`, and answer impact questions with
+`callers`/`callees`/`dependents`.
 
 ## Agent Skill
 

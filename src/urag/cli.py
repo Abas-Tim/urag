@@ -1,4 +1,4 @@
-"""urag CLI: init, index, watch, search, get, status, doctor."""
+"""urag CLI: init, embed, index, watch, search, get, status, doctor."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from .config import (
     default_model_cache_dir,
 )
 from .db import Database
-from .embed import Embedder, NoopEmbedder, create_embedder
+from .embed import Embedder, NoopEmbedder, create_embedder, purge_model_cache
 from .indexer import Indexer
 from .retrieve import Retriever
 from .watcher import run_watch
@@ -59,7 +59,7 @@ _embedder_cache: dict[str, Embedder] = {}
 
 
 def _embedder(cfg: Config) -> Embedder:
-    key = f"{cfg.embedding.provider}:{cfg.embedding.model}"
+    key = f"{cfg.embedding.provider}:{cfg.embedding.model}:{cfg.embedding.dimension}"
     if key in _embedder_cache:
         return _embedder_cache[key]
     try:
@@ -111,6 +111,127 @@ def init(
         indexer = Indexer(cfg, db, embedder, progress=lambda m: console.print(m))
         indexer.index_all()
     db.close()
+
+
+def _detect_local_dimension(model: str) -> int | None:
+    try:
+        from fastembed import TextEmbedding
+
+        return TextEmbedding.get_embedding_size(model)
+    except Exception:
+        return None
+
+
+@app.command()
+def embed(
+    root: Path = typer.Option(".", help="project root"),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="embedding model (local provider)"
+    ),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", help="local | http | none"
+    ),
+    dimension: Optional[int] = typer.Option(
+        None, "--dimension", help="vector dimension (auto-detected for local models)"
+    ),
+    reindex: bool = typer.Option(
+        False, "--reindex", help="re-embed all units after switching"
+    ),
+    keep_cache: bool = typer.Option(
+        False, "--keep-cache", help="keep the old model's files in the local cache"
+    ),
+):
+    """Show or change the embedding model. Switching clears old embeddings."""
+    root = root.resolve()
+    cfg = load_config(root)
+    emb = cfg.embedding
+
+    if model is None and provider is None and dimension is None:
+        console.print(f"[bold]embedding config[/bold] ({cfg.config_path})")
+        console.print(f"  provider:  {emb.provider}")
+        console.print(f"  model:     {emb.model}")
+        console.print(f"  dimension: {emb.dimension}")
+        if emb.provider == "local":
+            console.print(f"  cache:     {default_model_cache_dir()}")
+        if cfg.db_path.exists():
+            db = Database(cfg.db_path, emb.dimension)
+            s = db.stats()
+            db.close()
+            console.print(f"  embedded:  {s.embedded}/{s.units} units")
+        return
+
+    old_provider, old_model, old_dim = emb.provider, emb.model, emb.dimension
+    new_provider = provider or old_provider
+    if new_provider not in ("local", "http", "none"):
+        raise typer.BadParameter(
+            f"provider must be local, http, or none (got {new_provider!r})"
+        )
+    new_model = model or old_model
+
+    if new_provider == "local":
+        detected = _detect_local_dimension(new_model)
+        if detected is None:
+            if dimension is None:
+                raise typer.BadParameter(
+                    f"could not detect the vector size of {new_model!r}; pass --dimension"
+                )
+            new_dim = dimension
+        else:
+            if dimension is not None and dimension != detected:
+                raise typer.BadParameter(
+                    f"{new_model!r} produces {detected}-dimensional vectors, "
+                    f"not {dimension}"
+                )
+            new_dim = detected
+    elif new_provider == "http":
+        new_dim = dimension or old_dim
+        if new_dim <= 0:
+            raise typer.BadParameter("http provider needs --dimension > 0")
+    else:
+        new_dim = old_dim
+
+    changed = (
+        new_provider != old_provider or new_model != old_model or new_dim != old_dim
+    )
+
+    if changed and cfg.db_path.exists():
+        db = Database(cfg.db_path, old_dim if old_dim > 0 else new_dim)
+        db.clear_embeddings()
+        db.delete_meta("embedding_fingerprint")
+        db.close()
+        console.print("[yellow]cleared old embeddings[/yellow]")
+
+    if (
+        old_provider == "local"
+        and (new_provider != "local" or new_model != old_model)
+        and not keep_cache
+    ):
+        if purge_model_cache(old_model):
+            console.print(
+                f"[yellow]removed {old_model} from the local model cache[/yellow]"
+            )
+
+    emb.provider = new_provider
+    emb.model = new_model
+    emb.dimension = new_dim
+    cfg.save()
+
+    if not changed:
+        console.print("[green]embedding config unchanged[/green]")
+    else:
+        console.print(
+            f"[green]switched to {new_provider}:{new_model} ({new_dim}d)[/green]"
+        )
+        if not reindex and new_provider != "none" and cfg.db_path.exists():
+            console.print(
+                "[yellow]run `urag index` to re-embed units with the new model[/yellow]"
+            )
+
+    if reindex and new_provider != "none" and cfg.db_path.exists():
+        db = Database(cfg.db_path, new_dim)
+        indexer = Indexer(cfg, db, _embedder(cfg), progress=lambda m: console.print(m))
+        indexer.index_all()
+        db.close()
 
 
 @app.command()
@@ -504,6 +625,196 @@ def mcp(
     from .mcp_server import serve
 
     serve(root)
+
+
+@app.command()
+def resolve(
+    name: str = typer.Argument(..., help="symbol name or qualified name"),
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Find an exact symbol definition by name."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).resolve(
+            name, limit=top_k or 10
+        )
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print(f"[yellow]no definition found for {name}[/yellow]")
+            return
+        for r in result.results:
+            u = r.unit
+            head = f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
+            if r.stale:
+                head += " [red][stale][/red]"
+            console.print(head)
+            if u.signature:
+                console.print(f"  [cyan]{u.signature}[/cyan]")
+            if u.summary:
+                console.print(f"  {u.summary}")
+    finally:
+        db.close()
+
+
+@app.command()
+def callees(
+    unit_id: int = typer.Argument(..., help="unit id from search results"),
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """List what a unit calls (its call sites)."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).callees(
+            unit_id
+        )
+        if result is None:
+            error_console.print("[yellow]unit not found[/yellow]")
+            raise typer.Exit(1)
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        console.print(
+            f"[bold]{result['qualname'] or result['name']}[/bold] [dim]{result['file']}[/dim]"
+        )
+        if not result["callees"]:
+            console.print("[yellow]no call sites found[/yellow]")
+            return
+        for c in result["callees"]:
+            console.print(
+                f"  calls [green]{c['callee_full'] or c['callee']}[/green] at line {c['line']}"
+            )
+    finally:
+        db.close()
+
+
+@app.command()
+def dependents(
+    target: str = typer.Argument(..., help="module or symbol to find importers of"),
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Find what imports (depends on) a module or symbol."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).dependents(
+            target, limit=top_k or 50
+        )
+        result["count"] = len(result["results"])
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        console.print(f"[bold]{target}[/bold]: {len(result['results'])} dependent(s)")
+        for r in result["results"]:
+            line = f"  {r['path']}"
+            if r.get("alias"):
+                line += f" [dim]as {r['alias']}[/dim]"
+            console.print(line)
+    finally:
+        db.close()
+
+
+@app.command("symbols")
+def symbols_cmd(
+    file: str = typer.Argument(..., help="project-relative file path"),
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """List every indexed unit in a file."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).list_symbols(
+            file
+        )
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print(f"[yellow]no units indexed for {file}[/yellow]")
+            return
+        for r in result.results:
+            u = r.unit
+            console.print(
+                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{u.start_line}-{u.end_line}[/dim]"
+            )
+            if u.signature:
+                console.print(f"  [cyan]{u.signature}[/cyan]")
+    finally:
+        db.close()
+
+
+@app.command("read")
+def read_cmd(
+    path: str = typer.Argument(..., help="project-relative file path"),
+    root: Path = typer.Option(".", help="project root"),
+    start: Optional[int] = typer.Option(None, "--start", help="first line (1-based)"),
+    end: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
+):
+    """Read a file (or a line range) from the project."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).read_file(
+            path, start=start, end=end
+        )
+        if "error" in result:
+            error_console.print(f"[yellow]{result['error']}[/yellow]")
+            raise typer.Exit(1)
+        console.print(
+            f"[bold]{result['path']}[/bold] [dim]lines {result['start_line']}-{result['end_line']} of {result['total_lines']}[/dim]"
+        )
+        console.print(result["span"])
+    finally:
+        db.close()
+
+
+@app.command("recent")
+def recent_cmd(
+    root: Path = typer.Option(".", help="project root"),
+    limit: int = typer.Option(20, "--limit", help="number of commits"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Show recent git changes (branch, working tree, recent commits)."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    db.close()
+    git = Git(cfg.project_root)
+    result = git.recent_changes(limit=limit)
+    if json_out:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"[bold]branch:[/bold] {result['branch']} [dim]@{result['head'][:8] if result['head'] else ''}[/dim]"
+    )
+    w = result["working"]
+    if w["changed"] or w["deleted"] or w["untracked"]:
+        console.print("[bold]working changes:[/bold]")
+        for p in w["changed"]:
+            console.print(f"  [yellow]M[/yellow] {p}")
+        for p in w["deleted"]:
+            console.print(f"  [red]D[/red] {p}")
+        for p in w["untracked"]:
+            console.print(f"  [green]?[/green] {p}")
+    console.print("[bold]recent commits:[/bold]")
+    for c in result["commits"]:
+        console.print(
+            f"  [cyan]{c['short']}[/cyan] {c['subject']} [dim]({len(c['files'])} files)[/dim]"
+        )
 
 
 @app.command()

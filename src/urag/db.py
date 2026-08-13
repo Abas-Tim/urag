@@ -219,6 +219,10 @@ class Database:
         ).fetchone()
         return row["value"] if row else default
 
+    def delete_meta(self, key: str) -> None:
+        self.conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+        self.conn.commit()
+
     # ---------- files ----------
 
     def all_files(self) -> dict[str, SourceFile]:

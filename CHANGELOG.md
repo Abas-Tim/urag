@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Changed the default local embedding model to `BAAI/bge-base-en-v1.5`
+  (768-dimensional) and added a `urag embed` command to inspect or switch
+  the model/provider; switching clears old vectors, removes the old model
+  from the local cache, and re-embeds on the next index run.
+- Model/dimension mismatches are now rejected with a clear error instead of
+  failing mid-embedding.
 - Added agent-facing tools: `fetch_units`, `callees`, `dependents`, `resolve`,
   `children`, `list_files`, `list_symbols`, `read_file`, and `recent_changes`
   (MCP + CLI).

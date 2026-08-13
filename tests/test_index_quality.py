@@ -35,7 +35,9 @@ def test_deleted_files_remove_vectors(tmp_path: Path):
     cfg, db = _index(tmp_path)
     try:
         unit_id = db.conn.execute("SELECT id FROM units LIMIT 1").fetchone()[0]
-        db.store_embeddings([(unit_id, "python", "symbol", [0.0] * 384)])
+        db.store_embeddings(
+            [(unit_id, "python", "symbol", [0.0] * cfg.embedding.dimension)]
+        )
         assert db.stats().embedded == 1
         db.delete_files(["auth.py"])
         assert db.stats().embedded == 0

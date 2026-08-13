@@ -6,6 +6,7 @@ support retrieval prefixes (bge) can use them; others fall back to plain embed.
 
 from __future__ import annotations
 
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Sequence
@@ -20,8 +21,7 @@ class Embedder(ABC):
 
     @property
     @abstractmethod
-    def dimension(self) -> int:
-        ...
+    def dimension(self) -> int: ...
 
     @abstractmethod
     def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
@@ -40,11 +40,21 @@ class LocalEmbedder(Embedder):
 
         self.cfg = cfg
         self.cache_dir = Path(cache_dir or default_model_cache_dir())
+        try:
+            real_dim = TextEmbedding.get_embedding_size(cfg.model)
+        except Exception:
+            real_dim = None
+        if real_dim is not None and cfg.dimension != real_dim:
+            raise RuntimeError(
+                f"model {cfg.model!r} produces {real_dim}-dimensional vectors, "
+                f"but embedding.dimension is {cfg.dimension}. "
+                f"Run: urag embed --model {cfg.model}"
+            )
+        self._dim = real_dim or cfg.dimension
         self.model = TextEmbedding(
             model_name=cfg.model,
             cache_dir=str(self.cache_dir),
         )
-        self._dim = cfg.dimension
 
     @property
     def dimension(self) -> int:
@@ -77,7 +87,11 @@ class HttpEmbedder(Embedder):
         if self.cfg.http_model:
             payload["model"] = self.cfg.http_model
         with httpx.Client(timeout=self.cfg.http_timeout) as client:
-            resp = client.post(self.cfg.http_url.rstrip("/") + "/embeddings", json=payload, headers=headers)
+            resp = client.post(
+                self.cfg.http_url.rstrip("/") + "/embeddings",
+                json=payload,
+                headers=headers,
+            )
             resp.raise_for_status()
             data = resp.json()
         items = sorted(data["data"], key=lambda d: d.get("index", 0))
@@ -110,3 +124,18 @@ def create_embedder(cfg: EmbeddingConfig, cache_dir: Path | None = None) -> Embe
     if cfg.provider == "none":
         return NoopEmbedder()
     return LocalEmbedder(cfg, cache_dir=cache_dir)
+
+
+def model_cache_subdir(model: str) -> str:
+    """HuggingFace-style cache directory name fastembed uses for a model."""
+    return f"models--{model.replace('/', '--')}"
+
+
+def purge_model_cache(model: str, cache_dir: Path | None = None) -> bool:
+    """Delete a local model's files from the fastembed cache. Returns True if removed."""
+    root = Path(cache_dir or default_model_cache_dir())
+    target = root / model_cache_subdir(model)
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+        return True
+    return False

@@ -75,8 +75,8 @@ def language_for_path(path: Path) -> tuple[str, str] | None:
 @dataclass
 class EmbeddingConfig:
     provider: str = "local"  # local | http | none
-    model: str = "BAAI/bge-small-en-v1.5"
-    dimension: int = 384
+    model: str = "BAAI/bge-base-en-v1.5"
+    dimension: int = 768
     http_url: str = ""
     http_api_key: str = ""
     http_model: str = ""

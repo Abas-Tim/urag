@@ -148,6 +148,7 @@ run a periodic full rescan with `--rescan 30`.
 | `urag recent` | Show recent git changes (branch, working tree, commits) |
 | `urag status` | Show file, unit, embedding, language, and database statistics |
 | `urag doctor` | Check index and embedding health |
+| `urag embed` | Show or change the embedding model/provider |
 | `urag classify QUERY` | Show the query class and selected context budget |
 | `urag eval` | Compare retrieval systems on a question set |
 | `urag mcp` | Run the MCP server over stdio |
@@ -248,8 +249,8 @@ The default provider is a local ONNX model through FastEmbed:
 ```toml
 [embedding]
 provider = "local"
-model = "BAAI/bge-small-en-v1.5"
-dimension = 384
+model = "BAAI/bge-base-en-v1.5"
+dimension = 768
 ```
 
 The model is downloaded on first use and cached in `%LOCALAPPDATA%/urag` on
@@ -259,7 +260,7 @@ embedding endpoint is also supported:
 ```toml
 [embedding]
 provider = "http"
-dimension = 384
+dimension = 768
 http_url = "http://localhost:11434/v1"
 http_model = "nomic-embed-text"
 http_api_key = ""
@@ -269,6 +270,21 @@ Keep API keys in the local `.urag/urag.toml` only and do not commit them.
 Projects that already have an index can use `provider = "none"` for
 lexical-only retrieval; dense retrieval and embedding new units require an
 embedding provider.
+
+Switch models without editing the TOML:
+
+```bash
+urag embed                                     # show current embedding config
+urag embed --model BAAI/bge-small-en-v1.5      # switch model (auto-detects dimension)
+urag embed --model BAAI/bge-small-en-v1.5 --reindex
+urag embed --provider http --dimension 768     # switch provider
+```
+
+`urag embed` clears the old model's vectors from the index, removes the old
+model's files from the local cache, and saves the new configuration. The
+next `urag index` re-embeds everything with the new model; pass `--reindex`
+to do it in the same run, or `--keep-cache` to keep the old model's files.
+Mismatched `model`/`dimension` pairs are rejected at startup.
 
 ## Git Freshness
 

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import shutil
+import sys
 
 import pytest
 
@@ -10,18 +11,29 @@ from urag.config import load_config
 from urag.db import Database
 from urag.eval import (
     Hit,
+    OracleBaseline,
     Question,
+    ReadBaseline,
+    RgBaseline,
     SystemRun,
     _metrics,
     aggregate,
     autogen_alias_questions,
+    autogen_questions,
     autogen_transitive_questions,
     load_questions,
+    reresolve_questions,
+    resolve_question,
     scan_import_aliases,
     transitive_caller_ids,
 )
 from urag.indexer import Indexer
 from urag.embed import NoopEmbedder
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+
+import html_report  # noqa: E402
+import run_bench  # noqa: E402
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -177,3 +189,255 @@ def test_question_round_trip(tmp_path):
     path.write_text(json.dumps(q.to_dict()) + "\n", encoding="utf-8")
 
     assert load_questions(path) == [q]
+
+
+def test_question_round_trip_legacy_schema(tmp_path):
+    legacy = {
+        "query": "q",
+        "gold_unit_ids": [1],
+        "gold_file": "m.py",
+        "label": "definition",
+    }
+    path = tmp_path / "questions.jsonl"
+    path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+    q = load_questions(path)[0]
+    assert q.gold_files == ["m.py"]
+    assert q.gold_file == "m.py"
+
+
+def test_resolve_gold_files(fdb):
+    q = resolve_question(
+        fdb,
+        Question(
+            query="q", gold_unit_ids=[_unit_id(fdb, "entry"), _unit_id(fdb, "get_user")]
+        ),
+    )
+    assert q.gold_files == ["app/api.py", "core/chain.py"]
+    assert q.gold_file == "app/api.py"
+    q2 = resolve_question(fdb, Question(query="q", gold_file="core/chain.py"))
+    assert q2.gold_files == ["core/chain.py"]
+    assert q2.gold_unit_ids
+
+
+def test_oracle_covers_all_gold_files(fdb):
+    ids = [_unit_id(fdb, "entry"), _unit_id(fdb, "get_user")]
+    q = Question(query="q", gold_unit_ids=ids, gold_file="core/chain.py")
+    run = OracleBaseline(FIXTURE).search(q, fdb)
+    assert {h.file for h in run.hits} == {"app/api.py", "core/chain.py"}
+    assert {h.unit_id for h in run.hits} == set(ids)
+
+
+def test_metrics_file_recall_fractional():
+    q = Question(query="q", gold_files=["a.py", "b.py"])
+    m = _metrics(SystemRun("t", [Hit("a.py", 1, 5)], 0.01, 5), q, top_k=5)
+    assert m["file_recall"] == pytest.approx(0.5)
+    assert m["mrr"] == pytest.approx(1.0)
+
+
+def test_metrics_read_baseline_unit_ids():
+    q = Question(query="q", gold_unit_ids=[7, 8])
+    sr = SystemRun("read", [Hit("f.py", 7, 100, unit_ids=[7, 8, 9])], 0.0, 100)
+    m = _metrics(sr, q, top_k=5)
+    assert m["unit_recall"] == pytest.approx(1.0)
+    assert m["mrr"] == pytest.approx(1.0)
+
+
+def test_autogen_questions(fdb):
+    qs = autogen_questions(fdb, 3)
+    assert len(qs) == 6
+    assert {q.label for q in qs} == {"definition", "call"}
+    assert all(q.gold_unit_ids for q in qs)
+    assert all(q.query.startswith("where is ") for q in qs if q.label == "definition")
+    assert all(q.target for q in qs if q.label == "call")
+
+
+def test_reresolve_questions(fdb):
+    trans = autogen_transitive_questions(fdb, 10)
+    rebuilt = reresolve_questions(fdb, trans)
+    assert len(rebuilt) == len(trans)
+    for a, b in zip(trans, rebuilt):
+        assert a.gold_unit_ids == b.gold_unit_ids
+        assert a.gold_hops == b.gold_hops
+
+    defs = [q for q in autogen_questions(fdb, 2) if q.label == "definition"]
+    red = reresolve_questions(fdb, defs)
+    assert [q.gold_unit_ids for q in red] == [q.gold_unit_ids for q in defs]
+
+    calls = [q for q in autogen_questions(fdb, 2) if q.label == "call"]
+    rec = reresolve_questions(fdb, calls)
+    for a, b in zip(calls, rec):
+        assert set(a.gold_unit_ids) == set(b.gold_unit_ids)
+
+
+def test_rg_and_read_baselines(fdb):
+    if not shutil.which("rg"):
+        pytest.skip("ripgrep not installed")
+    rg = RgBaseline(FIXTURE)
+    run = rg.search("stage3", 5, fdb)
+    assert run.hits
+    assert all(h.tokens >= 1 for h in run.hits)
+    assert any("core/chain.py" in h.file for h in run.hits)
+    assert any(h.detail for h in run.hits)
+
+    stop = rg.search("who transitively calls stop", 5, fdb)
+    assert stop.hits
+    assert any("core/chain.py" in h.file for h in stop.hits)
+
+    read = ReadBaseline(FIXTURE)
+    rrun = read.search("stage3", 5, fdb)
+    assert rrun.hits
+    assert all(h.unit_ids for h in rrun.hits)
+    assert rrun.tokens > 0
+
+
+def test_html_report_renders(capsys):
+    report = {
+        "schema_version": 2,
+        "urag_version": "test",
+        "top_k": 3,
+        "questions": [
+            {
+                "query": "where is stop defined",
+                "label": "definition",
+                "gold_file": "core/chain.py",
+                "gold_files": ["core/chain.py"],
+                "gold_unit_ids": [1],
+                "target": "",
+                "depth": 1,
+                "gold_hops": {},
+            }
+        ],
+        "systems": {
+            "urag-hybrid": {
+                "n": 1,
+                "unit_recall": 1.0,
+                "file_recall": 1.0,
+                "precision": 1.0,
+                "indirect_recall": 0.0,
+                "mrr": 1.0,
+                "mean_tokens": 30,
+                "mean_sec": 0.01,
+                "p50_sec": 0.01,
+                "p95_sec": 0.01,
+            },
+            "rg": {
+                "n": 1,
+                "unit_recall": 0.0,
+                "file_recall": 0.0,
+                "precision": 0.0,
+                "indirect_recall": 0.0,
+                "mrr": 0.0,
+                "mean_tokens": 40,
+                "mean_sec": 0.02,
+                "p50_sec": 0.02,
+                "p95_sec": 0.02,
+            },
+            "read": {
+                "n": 1,
+                "unit_recall": 1.0,
+                "file_recall": 1.0,
+                "precision": 0.1,
+                "indirect_recall": 0.0,
+                "mrr": 1.0,
+                "mean_tokens": 400,
+                "mean_sec": 0.001,
+                "p50_sec": 0.001,
+                "p95_sec": 0.001,
+            },
+        },
+        "per_query": {
+            "urag-hybrid": [
+                {
+                    "unit_recall": 1.0,
+                    "file_recall": 1.0,
+                    "precision": 1.0,
+                    "indirect_recall": 0.0,
+                    "mrr": 1.0,
+                    "tokens": 30,
+                    "seconds": 0.01,
+                    "n_hits": 1,
+                }
+            ],
+            "rg": [
+                {
+                    "unit_recall": 0.0,
+                    "file_recall": 0.0,
+                    "precision": 0.0,
+                    "indirect_recall": 0.0,
+                    "mrr": 0.0,
+                    "tokens": 40,
+                    "seconds": 0.02,
+                    "n_hits": 1,
+                }
+            ],
+            "read": [
+                {
+                    "unit_recall": 1.0,
+                    "file_recall": 1.0,
+                    "precision": 0.1,
+                    "indirect_recall": 0.0,
+                    "mrr": 1.0,
+                    "tokens": 400,
+                    "seconds": 0.001,
+                    "n_hits": 1,
+                }
+            ],
+        },
+        "hits": {
+            "urag-hybrid": [
+                [
+                    {
+                        "file": "core/chain.py",
+                        "unit_id": 1,
+                        "unit_ids": [],
+                        "tokens": 30,
+                        "title": "stop()",
+                        "detail": "def stop():\n    pass",
+                    }
+                ]
+            ],
+            "rg": [
+                [
+                    {
+                        "file": "core/chain.py",
+                        "unit_id": None,
+                        "unit_ids": [],
+                        "tokens": 40,
+                        "title": "",
+                        "detail": "3: stop()",
+                    }
+                ]
+            ],
+            "read": [
+                [
+                    {
+                        "file": "core/chain.py",
+                        "unit_id": 1,
+                        "unit_ids": [1, 2, 3],
+                        "tokens": 400,
+                        "title": "",
+                        "detail": "def entry(): ...",
+                    }
+                ]
+            ],
+        },
+        "index_seconds": 1.2,
+    }
+    html = html_report.render_report(report, title="t.json")
+    assert html.startswith("<!DOCTYPE html>")
+    assert "urag hybrid" in html
+    assert "grep (opencode Grep)" in html
+    assert "read file (opencode Read)" in html
+    assert "def stop()" in html
+    assert "gold" in html
+    assert "Token efficiency" in html
+
+
+def test_summarize_warns_on_empty_system(capsys):
+    run_bench.summarize("t", {"systems": {"broken": {}}})
+    assert "no results" in capsys.readouterr().out
+
+
+def test_git_head_format():
+    head = run_bench.git_head(Path(__file__).resolve().parents[1])
+    assert "@" in head

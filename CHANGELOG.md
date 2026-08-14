@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3.1 - 2026-08-13
 
 - Benchmarks: added opencode-style baselines (`rg` grep emulation with
   matching-line context, `read` whole-file emulation of the grep-then-read

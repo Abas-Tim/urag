@@ -756,24 +756,24 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
 
 
 def aggregate(rows: list[dict | None]) -> dict:
-    rows = [r for r in rows if r is not None]
-    if not rows:
+    present = [r for r in rows if r is not None]
+    if not present:
         return {}
-    lat = sorted(r["seconds"] for r in rows)
+    lat = sorted(r["seconds"] for r in present)
     n = len(lat)
 
     def _mean(key: str) -> float:
-        vals = [r[key] for r in rows if r.get(key) is not None]
+        vals = [r[key] for r in present if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else 0.0
 
     return {
         "n": n,
-        "unit_recall": sum(r["unit_recall"] for r in rows) / n,
-        "file_recall": sum(r["file_recall"] for r in rows) / n,
+        "unit_recall": sum(r["unit_recall"] for r in present) / n,
+        "file_recall": sum(r["file_recall"] for r in present) / n,
         "precision": _mean("precision"),
         "indirect_recall": _mean("indirect_recall"),
-        "mrr": sum(r["mrr"] for r in rows) / n,
-        "mean_tokens": sum(r["tokens"] for r in rows) / n,
+        "mrr": sum(r["mrr"] for r in present) / n,
+        "mean_tokens": sum(r["tokens"] for r in present) / n,
         "mean_sec": sum(lat) / n,
         "p50_sec": lat[(n - 1) // 2] if n else 0.0,
         "p95_sec": lat[int(math.ceil(0.95 * n)) - 1] if n else 0.0,

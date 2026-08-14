@@ -378,22 +378,33 @@ def eval_cmd(
     report: Optional[Path] = typer.Option(
         None, "--report", help="write full report JSON to this file"
     ),
+    reresolve: bool = typer.Option(
+        False,
+        "--reresolve",
+        help="re-derive gold from the current index for --questions files "
+        "taken from an older report (cross-branch comparison)",
+    ),
 ):
     """Compare urag retrieval vs grep / chunk-RAG / whole-file baselines."""
     from .eval import (
+        EVAL_SCHEMA_VERSION,
         ChunkBaseline,
         Hit,
         OracleBaseline,
+        ReadBaseline,
         RgBaseline,
         SystemRun,
+        _metrics,
+        _tokens,
+        _unit_tokens,
         aggregate,
         autogen_alias_questions,
         autogen_questions,
         autogen_transitive_questions,
         judge_results,
         load_questions,
+        reresolve_questions,
         resolve_question,
-        _metrics,
     )
     from .git_aware import Git
 
@@ -402,6 +413,12 @@ def eval_cmd(
     try:
         if questions:
             qs = load_questions(questions)
+            if reresolve:
+                before = len(qs)
+                qs = reresolve_questions(db, qs)
+                console.print(
+                    f"[dim]reresolved {len(qs)}/{before} questions against the current index[/dim]"
+                )
         elif autogen:
             qs = autogen_questions(db, autogen)
         else:
@@ -415,72 +432,123 @@ def eval_cmd(
         chosen = (systems or "urag-hybrid,urag-lexical,rg,chunk").split(",")
         retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
         rg = RgBaseline(cfg.project_root)
+        read = ReadBaseline(cfg.project_root) if "read" in chosen else None
         chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
         oracle = OracleBaseline(cfg.project_root)
 
-        def urag_run(result) -> SystemRun:
-            hits = [
-                Hit(
-                    x.file_path,
-                    x.unit.id,
-                    max(1, len(json.dumps(x.to_dict(), ensure_ascii=False)) // 4),
-                )
-                for x in result.results
-            ]
-            return SystemRun(result.mode, hits, 0.0, sum(h.tokens for h in hits))
+        if "urag-hybrid" in chosen or "urag-lexical" in chosen:
+            retriever.search("__warmup__", top_k=top_k)
 
-        rows: dict[str, list[dict]] = {s: [] for s in chosen}
+        def urag_run(result) -> SystemRun:
+            hits = []
+            total = 0
+            for x in result.results:
+                ev = db.load_evidence(x.unit.id)
+                span = (ev or {}).get("span", "")
+                toks = _tokens(span) if span else _unit_tokens(x.unit)
+                hits.append(
+                    Hit(
+                        x.file_path,
+                        x.unit.id,
+                        toks,
+                        detail=span,
+                        title=(x.unit.signature or x.unit.name),
+                    )
+                )
+                total += toks
+            return SystemRun(result.mode, hits, 0.0, total)
+
+        rows: dict[str, list] = {s: [None] * len(qs) for s in chosen}
         runs_by_system: dict[str, dict[int, SystemRun]] = {}
         console.print(
             f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]"
         )
-        for i, q in enumerate(qs):
+
+        def safe_run(name: str, fn) -> SystemRun:
             t = time.perf_counter()
+            try:
+                run = fn()
+            except Exception as exc:  # one failing system must not kill the eval
+                console.print(f"[yellow]{name}: query failed: {exc}[/yellow]")
+                return SystemRun(name, [], 0.0, 0)
+            if run.seconds == 0.0:
+                run.seconds = time.perf_counter() - t
+            return run
+
+        for i, q in enumerate(qs):
             runs: dict[str, SystemRun] = {}
             if "urag-hybrid" in chosen:
-                r = retriever.search(q.query, top_k=top_k, query_class="local")
-                run = urag_run(r)
-                run.seconds = time.perf_counter() - t
-                runs["urag-hybrid"] = run
+                runs["urag-hybrid"] = safe_run(
+                    "urag-hybrid",
+                    lambda: urag_run(
+                        retriever.search(q.query, top_k=top_k, query_class="local")
+                    ),
+                )
             if "urag-lexical" in chosen:
-                t = time.perf_counter()
-                r = retriever.search(q.query, top_k=top_k, mode="lexical")
-                run = urag_run(r)
-                run.seconds = time.perf_counter() - t
-                runs["urag-lexical"] = run
+                runs["urag-lexical"] = safe_run(
+                    "urag-lexical",
+                    lambda: urag_run(
+                        retriever.search(q.query, top_k=top_k, mode="lexical")
+                    ),
+                )
             if "rg" in chosen:
-                runs["rg"] = rg.search(q.query, top_k, db)
+                runs["rg"] = safe_run("rg", lambda: rg.search(q.query, top_k, db))
+            if read is not None:
+                runs["read"] = safe_run("read", lambda: read.search(q.query, top_k, db))
             if chunk is not None:
-                runs["chunk"] = chunk.search(q.query, top_k, db)
+                runs["chunk"] = safe_run(
+                    "chunk", lambda: chunk.search(q.query, top_k, db)
+                )
             if q.target and ("urag-callers" in chosen or "urag-transitive" in chosen):
                 if "urag-callers" in chosen:
-                    t = time.perf_counter()
-                    r = retriever.search_callers(q.target, limit=top_k)
-                    run = urag_run(r)
-                    run.seconds = time.perf_counter() - t
-                    runs["urag-callers"] = run
-                if "urag-transitive" in chosen:
-                    t = time.perf_counter()
-                    r = retriever.search_transitive(
-                        q.target, depth=q.depth or 3, limit=top_k
+                    runs["urag-callers"] = safe_run(
+                        "urag-callers",
+                        lambda: urag_run(
+                            retriever.search_callers(q.target, limit=top_k)
+                        ),
                     )
-                    run = urag_run(r)
-                    run.seconds = time.perf_counter() - t
-                    runs["urag-transitive"] = run
+                if "urag-transitive" in chosen:
+                    runs["urag-transitive"] = safe_run(
+                        "urag-transitive",
+                        lambda: urag_run(
+                            retriever.search_transitive(
+                                q.target, depth=q.depth or 3, limit=top_k
+                            )
+                        ),
+                    )
             if "oracle" in chosen:
-                runs["oracle"] = oracle.search(q, db)
+                runs["oracle"] = safe_run("oracle", lambda: oracle.search(q, db))
             for name, run in runs.items():
                 runs_by_system.setdefault(name, {})[i] = run
-                rows[name].append(_metrics(run, q, top_k))
+                rows[name][i] = _metrics(run, q, top_k)
 
         agg = {name: aggregate(v) for name, v in rows.items()}
         if json_out or report:
+            from . import __version__
+
             payload = {
+                "schema_version": EVAL_SCHEMA_VERSION,
+                "urag_version": __version__,
                 "top_k": top_k,
                 "questions": [q.to_dict() for q in qs],
                 "systems": {name: agg.get(name, {}) for name in chosen},
                 "per_query": rows,
+                "hits": {
+                    name: [
+                        [
+                            h.to_dict()
+                            for h in (
+                                runs_by_system.get(name, {}).get(i)
+                                or SystemRun(name, [], 0.0, 0)
+                            ).hits
+                        ]
+                        for i in range(len(qs))
+                    ]
+                    for name in chosen
+                },
             }
+            if chunk is not None:
+                payload["chunk_load_seconds"] = chunk.load_seconds
             text = json.dumps(payload, ensure_ascii=False, indent=2)
             if json_out:
                 print(text)

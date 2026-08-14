@@ -286,6 +286,19 @@ next `urag index` re-embeds everything with the new model; pass `--reindex`
 to do it in the same run, or `--keep-cache` to keep the old model's files.
 Mismatched `model`/`dimension` pairs are rejected at startup.
 
+Common local model choices:
+
+| Model | Dimensions | Storage per unit | Model RAM | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `BAAI/bge-small-en-v1.5` | 384 | ~9 KB | ~150 MB | Smallest footprint |
+| `BAAI/bge-base-en-v1.5` (default) | 768 | ~18 KB | ~500 MB | Best quality per byte |
+| `BAAI/bge-large-en-v1.5` | 1024 | ~24 KB | ~1.3 GB | Roughly base quality, 3x cost |
+| `intfloat/multilingual-e5-small` | 384 | ~9 KB | ~150 MB | Multilingual codebases |
+
+Vector storage scales linearly with the dimension; model RAM is a one-time
+cost independent of repository size. Because urag retrieval is hybrid, the
+lexical index carries exact-name queries even when dense quality is modest.
+
 ## Git Freshness
 
 For Git repositories, indexed files record the commit used at indexing time.
@@ -360,19 +373,21 @@ cp -r skills/urag ~/.claude/skills/urag
 
 ## Measuring Retrieval
 
-The evaluation harness compares urag with non-structural baselines on the same
-questions:
+The evaluation harness compares urag with the context-gathering tools an
+opencode agent normally uses (`grep` matching lines, `read` of whole files
+located via grep) plus a naive chunk-RAG baseline, all on the same questions:
 
 ```bash
 urag eval --root . --autogen 10 --top-k 5
 urag eval --root . --questions questions.jsonl
 urag eval --root . --transitive 25 --alias 25 \
   --systems urag-callers,urag-transitive,urag-hybrid
-uv run python benchmarks/run_bench.py --self
+uv run python benchmarks/run_bench.py --self --yes
 ```
 
 It measures fractional unit recall@k, file recall@k, precision, MRR, approximate tokens
-per retrieval, and p50/p95 latency. Definition and call questions can be
+per retrieval (chars/4 of the context actually returned by each system), and
+p50/p95 latency. Definition and call questions can be
 generated with provable gold data from the index. Custom conceptual questions
 can be supplied as JSONL:
 
@@ -380,11 +395,28 @@ can be supplied as JSONL:
 {"query": "where is TokenValidator defined", "gold_file": "src/auth.py"}
 ```
 
-### Checked-In Benchmark Snapshot
+`run_bench.py` wipes and rebuilds the target `.urag/` index on every run
+(`--yes` confirms non-fixture roots), times the index build, writes a JSON
+report to `benchmarks/reports/`, and renders a detailed self-contained HTML
+report next to it: aggregate tables, charts, and per-question retrieval
+samples from every system with auto-generated explanations of where urag wins
+or loses. Before/after comparisons reuse a previous report's questions and
+re-derive gold against the new index (unit ids are index-specific), or diff
+two finished reports:
 
-The following values come from the reports in `benchmarks/reports/`, using
-`top_k=5`. They are reference measurements from one environment, not
-performance guarantees.
+```bash
+uv run python benchmarks/run_bench.py --reuse-questions benchmarks/reports/<old>.json
+uv run python benchmarks/run_bench.py --compare <before>.json <after>.json
+```
+
+### Historical Benchmark Snapshot
+
+The values below are historical reference measurements from one environment,
+using `top_k=5` (newer runs also include the `read` opencode-style baseline,
+which these predate). They are not performance guarantees; rerun the
+benchmark before comparing new results — reports are generated into
+`benchmarks/reports/` (gitignored) and the HTML rendering includes per-system
+data samples and score breakdowns.
 
 | Dataset | System | Questions | Unit recall | Precision | MRR | p50 | Mean compact tokens |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -394,15 +426,19 @@ performance guarantees.
 | urag repository | `urag-transitive` | 47 | 1.000 | 1.000 | 1.000 | 10.38 ms | 78.2 |
 | urag repository | `urag-hybrid` | 57 | 0.316 | 0.077 | 0.252 | 4.38 ms | 134.7 |
 
-The checked-in reports predate the current index-lifecycle and retrieval-quality
-changes; rerun the benchmark before comparing new results. The transitive system
+The historical reports predate the current index-lifecycle and retrieval-quality
+changes and the default embedding model change (bge-small 384d to bge-base
+768d); rerun the benchmark before comparing new results. The transitive system
 reached `indirect_recall=1.000` on the synthetic
 fixture and `0.440` on the checked-in urag repository report. In the current
 evaluation harness, unit recall is fractional across the gold units for a
 question. Graph systems
 also run on graph-eligible questions, while the hybrid row includes the full
 generated question set, so the rows are directional rather than a universal
-ranking.
+ranking. Multi-hop gold is generated with the same caller-resolution path the
+production retrieval uses, so gold is consistent with what urag can find;
+caller matching by bare last segment can still conflate same-named symbols
+across modules — a caveat for `--self` runs, not the synthetic fixture.
 
 The efficiency gain urag is designed to provide comes from returning compact
 metadata first and loading source spans only when requested. Actual latency,

@@ -2,7 +2,23 @@
 
 ## Unreleased
 
-- Changed the default local embedding model to `BAAI/bge-base-en-v1.5`
+- Benchmarks: added opencode-style baselines (`rg` grep emulation with
+  matching-line context, `read` whole-file emulation of the grep-then-read
+  agent loop), consistent token accounting (chars/4 of context actually
+  returned), stopword/segment-aware grep terms, and a warmup query before
+  timing.
+- Benchmarks: reports now record index-build time, schema/version fields, and
+  per-system-per-question hit details; `benchmarks/html_report.py` renders a
+  self-contained HTML report with aggregate tables, charts, retrieval samples
+  per system, and data-driven explanations of where urag wins or loses.
+- Benchmarks: `run_bench.py` gained `--compare` (diff two reports),
+  `--reuse-questions` (cross-branch comparison with gold re-derived from the
+  current index via `eval --reresolve`), `--yes`, and HTML output;
+  `benchmarks/reports/` is no longer tracked in git.
+- Fixed the oracle baseline ignoring all but the first gold file, multi-file
+  gold handling (`gold_files`) with fractional file recall, and per-query
+  alignment for graph-only systems in JSON reports.
+- Changed the default embedding model to `BAAI/bge-base-en-v1.5`
   (768-dimensional) and added a `urag embed` command to inspect or switch
   the model/provider; switching clears old vectors, removes the old model
   from the local cache, and re-embeds on the next index run.

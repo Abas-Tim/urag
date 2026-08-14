@@ -32,6 +32,9 @@ from .models import Unit
 from .retrieve import Retriever
 
 
+EVAL_SCHEMA_VERSION = 2
+
+
 @dataclass
 class Question:
     query: str
@@ -41,12 +44,20 @@ class Question:
     target: str = ""
     depth: int = 1
     gold_hops: dict[int, int] = field(default_factory=dict)
+    gold_files: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        self.gold_files = self.gold_files or (
+            [self.gold_file] if self.gold_file else []
+        )
 
     def to_dict(self) -> dict:
         return {
             "query": self.query,
             "label": self.label,
-            "gold_file": self.gold_file,
+            "gold_file": self.gold_file
+            or (self.gold_files[0] if self.gold_files else ""),
+            "gold_files": self.gold_files,
             "gold_unit_ids": self.gold_unit_ids,
             "target": self.target,
             "depth": self.depth,
@@ -60,6 +71,19 @@ class Hit:
     unit_id: int | None
     tokens: int
     detail: str = ""
+    unit_ids: list[int] = field(default_factory=list)
+    title: str = ""
+
+    def to_dict(self, detail_cap: int = 400) -> dict:
+        return {
+            "file": self.file,
+            "unit_id": self.unit_id,
+            "unit_ids": self.unit_ids,
+            "tokens": self.tokens,
+            "title": self.title[:detail_cap],
+            "detail": self.detail[:detail_cap]
+            + ("…" if len(self.detail) > detail_cap else ""),
+        }
 
 
 @dataclass
@@ -84,7 +108,45 @@ def _unit_tokens(u: Unit) -> int:
 
 
 class RgBaseline:
-    """Rank files by number of regex matches for the query terms."""
+    """opencode `grep` emulation: rank files by matching-line counts and show
+    the matching lines, like the agent's grep tool output."""
+
+    STOPWORDS = {
+        "who",
+        "what",
+        "where",
+        "when",
+        "which",
+        "why",
+        "how",
+        "is",
+        "are",
+        "was",
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "to",
+        "for",
+        "do",
+        "does",
+        "did",
+        "call",
+        "calls",
+        "called",
+        "calling",
+        "define",
+        "defined",
+        "definition",
+        "defines",
+        "transitively",
+        "and",
+        "or",
+        "it",
+        "that",
+    }
 
     def __init__(self, root: Path):
         self.root = root
@@ -99,16 +161,33 @@ class RgBaseline:
     def search(self, query: str, top_k: int, db: Database) -> SystemRun:
         import re
 
-        terms = [t for t in re.split(r"[^A-Za-z0-9_.]+", query) if len(t) > 1][:4]
+        raw = re.split(r"[^A-Za-z0-9_.]+", query)
+        terms: list[str] = []
+        seen: set[str] = set()
+        for t in raw:
+            if len(t) <= 1 or t.lower() in self.STOPWORDS:
+                continue
+            candidates = [
+                p
+                for p in re.split(r"[._]", t)
+                if len(p) > 1 and p.lower() not in self.STOPWORDS
+            ] + [t]
+            for cand in candidates:
+                if cand not in seen:
+                    seen.add(cand)
+                    terms.append(cand)
+            if len(terms) >= 4:
+                break
+        terms = terms[:4]
         t0 = time.perf_counter()
         if not terms:
             return SystemRun("rg", [], 0.0, 0)
-        # one rg per term, count matches per file
         counts: dict[str, int] = {}
+        lines: dict[str, list[str]] = {}
         for term in terms:
             try:
                 proc = subprocess.run(
-                    ["rg", "--no-messages", "-i", "--count-matches", "-F", term, "."],
+                    ["rg", "--no-messages", "-i", "-n", "-F", term, "."],
                     cwd=str(self.root),
                     capture_output=True,
                     text=True,
@@ -117,32 +196,84 @@ class RgBaseline:
             except (OSError, subprocess.TimeoutExpired):
                 continue
             for line in proc.stdout.splitlines():
-                if ":" in line:
-                    path, cnt = line.rsplit(":", 1)
-                    path = self._normalize_path(path)
-                    try:
-                        counts[path] = counts.get(path, 0) + int(cnt)
-                    except ValueError:
-                        continue
+                if line.count(":") < 2:
+                    continue
+                path, lineno, text = line.rsplit(":", 2)
+                path = self._normalize_path(path)
+                counts[path] = counts.get(path, 0) + 1
+                bucket = lines.setdefault(path, [])
+                if len(bucket) < 40:
+                    entry = f"{lineno}: {text}"
+                    if entry not in bucket:
+                        bucket.append(entry)
         ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[: top_k * 2]
-        # map files to their units for recall
         hits: list[Hit] = []
-        for path, cnt in ranked:
+        for path, _cnt in ranked:
             rows = db.conn.execute(
-                "SELECT u.id FROM units u JOIN files f ON f.id = u.file_id WHERE f.path = ? ORDER BY u.start_line LIMIT ?",
-                (path, 3),
+                "SELECT u.id FROM units u JOIN files f ON f.id = u.file_id WHERE f.path = ? ORDER BY u.start_line LIMIT 3",
+                (path,),
             ).fetchall()
             ids = [r["id"] for r in rows]
-            matched_tokens = max(1, cnt * 10)
+            detail = "\n".join(lines[path])
+            matched_tokens = _tokens(detail)
             for uid in ids:
-                hits.append(Hit(path, uid, matched_tokens))
+                hits.append(Hit(path, uid, matched_tokens, detail=detail))
             if not ids:
-                hits.append(Hit(path, None, matched_tokens))
+                hits.append(Hit(path, None, matched_tokens, detail=detail))
             if len(hits) >= top_k * 5:
                 break
         return SystemRun(
             "rg", hits, time.perf_counter() - t0, sum(h.tokens for h in hits)
         )
+
+
+class ReadBaseline:
+    """opencode `read` emulation: the standard agent loop is grep to find
+    candidate files, then read the top files whole. Context = full file
+    contents, so token cost is what the agent actually pays."""
+
+    MAX_FILES = 10
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.rg = RgBaseline(root)
+
+    def search(self, query: str, top_k: int, db: Database) -> SystemRun:
+        t0 = time.perf_counter()
+        grepped = self.rg.search(query, top_k, db)
+        files: list[str] = []
+        for h in grepped.hits:
+            if h.file not in files:
+                files.append(h.file)
+            if len(files) >= self.MAX_FILES:
+                break
+        if not files:
+            return SystemRun("read", [], time.perf_counter() - t0, 0)
+        hits: list[Hit] = []
+        total = 0
+        for path in files[:top_k]:
+            p = self.root / path
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rows = db.conn.execute(
+                "SELECT u.id, u.unit_type FROM units u JOIN files f ON f.id = u.file_id WHERE f.path = ? AND u.unit_type != 'import'",
+                (path,),
+            ).fetchall()
+            unit_ids = [r["id"] for r in rows]
+            toks = _tokens(text)
+            total += toks
+            hits.append(
+                Hit(
+                    path,
+                    unit_ids[0] if unit_ids else None,
+                    toks,
+                    detail="\n".join(text.splitlines()[:40]),
+                    unit_ids=unit_ids,
+                )
+            )
+        return SystemRun("read", hits, time.perf_counter() - t0, total)
 
 
 class ChunkBaseline:
@@ -202,7 +333,8 @@ class ChunkBaseline:
 
 
 class OracleBaseline:
-    """Whole gold files as context (answer-quality upper bound)."""
+    """Whole gold evidence as context (answer-quality upper bound): one span
+    per gold unit across ALL gold files (not just the first one)."""
 
     def __init__(self, root: Path):
         self.root = root
@@ -218,29 +350,24 @@ class OracleBaseline:
 
     def search(self, question: Question, db: Database) -> SystemRun:
         hits: list[Hit] = []
-        total = 0
-        if question.gold_file:
-            p = self._safe_file(question.gold_file)
-            if p and p.is_file():
-                txt = p.read_text(encoding="utf-8", errors="replace")
-                return SystemRun(
-                    "oracle",
-                    [Hit(question.gold_file, None, _tokens(txt))],
-                    0.0,
-                    _tokens(txt),
-                )
+        seen: set[tuple[str, int]] = set()
         for gid in question.gold_unit_ids:
             got = db.unit_by_id(gid)
-            if got:
-                u, path, _ = got
-                if not any(h.file == path for h in hits):
-                    text = db.load_evidence(gid) or {}
-                    span = text.get("span", "")
-                    total += _tokens(span) if span else _unit_tokens(u)
-                    hits.append(
-                        Hit(path, gid, _tokens(span) if span else _unit_tokens(u))
-                    )
-        return SystemRun("oracle", hits, 0.0, total)
+            if not got or (got[1], gid) in seen:
+                continue
+            seen.add((got[1], gid))
+            u, path, _ = got
+            text = db.load_evidence(gid) or {}
+            span = text.get("span", "")
+            toks = _tokens(span) if span else _unit_tokens(u)
+            hits.append(Hit(path, gid, toks, detail=span, title=u.signature or u.name))
+        if not hits:
+            for path in question.gold_files or [question.gold_file]:
+                p = self._safe_file(path)
+                if p and p.is_file():
+                    txt = p.read_text(encoding="utf-8", errors="replace")
+                    hits.append(Hit(path, None, _tokens(txt), detail=txt))
+        return SystemRun("oracle", hits, 0.0, sum(h.tokens for h in hits))
 
 
 # ---------------------------------------------------------------------------
@@ -250,17 +377,30 @@ class OracleBaseline:
 
 def resolve_question(db: Database, q: Question) -> Question:
     if q.gold_unit_ids:
+        if not q.gold_files:
+            marks = ",".join("?" * len(q.gold_unit_ids))
+            rows = db.conn.execute(
+                f"SELECT DISTINCT f.path FROM units u JOIN files f ON f.id = u.file_id WHERE u.id IN ({marks}) ORDER BY f.path",
+                q.gold_unit_ids,
+            ).fetchall()
+            q.gold_files = [r["path"] for r in rows]
+        if not q.gold_file and q.gold_files:
+            q.gold_file = q.gold_files[0]
+        return q
+    if q.gold_files:
+        marks = ",".join("?" * len(q.gold_files))
+        rows = db.conn.execute(
+            f"SELECT u.id FROM units u JOIN files f ON f.id = u.file_id WHERE f.path IN ({marks}) ORDER BY f.path, u.start_line",
+            q.gold_files,
+        ).fetchall()
+        q.gold_unit_ids = [r["id"] for r in rows]
         if not q.gold_file:
-            row = db.conn.execute(
-                "SELECT f.path FROM units u JOIN files f ON f.id = u.file_id WHERE u.id = ?",
-                (q.gold_unit_ids[0],),
-            ).fetchone()
-            if row:
-                q.gold_file = row["path"]
+            q.gold_file = q.gold_files[0]
         return q
     if q.gold_file:
+        q.gold_files = [q.gold_file]
         rows = db.conn.execute(
-            "SELECT u.id FROM units u JOIN files f ON f.id = u.file_id WHERE f.path = ?",
+            "SELECT u.id FROM units u JOIN files f ON f.id = u.file_id WHERE f.path = ? ORDER BY u.start_line",
             (q.gold_file,),
         ).fetchall()
         q.gold_unit_ids = [r["id"] for r in rows]
@@ -317,45 +457,21 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
 # ---------------------------------------------------------------------------
 
 
-def _raw_callers(db: Database, names: list[str]) -> list[dict]:
-    """Exact-match callers of any of `names` (by last segment or full chain)."""
-    names = [n for n in names if n]
-    if not names:
-        return []
-    marks = ",".join("?" * len(names))
-    rows = db.conn.execute(
-        f"""
-        SELECT DISTINCT e.caller_unit_id, e.callee_full, e.line, f.path
-        FROM call_edges e JOIN files f ON f.id = e.file_id
-        WHERE e.callee IN ({marks}) OR e.callee_full IN ({marks})
-        """,
-        names + names,
-    ).fetchall()
-    out: list[dict] = []
-    for r in rows:
-        got = db.unit_by_id(r["caller_unit_id"])
-        if got:
-            out.append(
-                {
-                    "unit": got[0],
-                    "path": r["path"],
-                    "callee_full": r["callee_full"],
-                    "line": r["line"],
-                }
-            )
-    return out
-
-
 def transitive_caller_ids(
     db: Database, name: str, max_depth: int = 3
 ) -> dict[int, int]:
-    """BFS over call_edges: unit_id -> shortest hop (1 = direct caller)."""
+    """BFS over call_edges: unit_id -> shortest hop (1 = direct caller).
+
+    Uses the same caller-resolution path as production retrieval
+    (``Database.callers``), so the gold matches what the system under test
+    can actually find — including alias-resolved and fully-qualified names.
+    """
     seen: dict[int, int] = {}
     frontier: list[str] = [name]
     for hop in range(1, max_depth + 1):
         nxt: list[str] = []
         for callee in frontier:
-            for row in _raw_callers(db, [callee]):
+            for row in db.callers(callee, limit=10000):
                 uid = row["unit"].id
                 if uid in seen:
                     continue
@@ -364,7 +480,7 @@ def transitive_caller_ids(
                 nxt.append(u.name)
                 if u.qualname and u.qualname != u.name:
                     nxt.append(u.qualname)
-        frontier = nxt
+        frontier = list(dict.fromkeys(nxt))
         if not frontier:
             break
     return seen
@@ -536,6 +652,8 @@ def load_questions(path: Path) -> list[Question]:
                     target=d.get("target", ""),
                     depth=d.get("depth", 1),
                     gold_hops={int(k): v for k, v in d.get("gold_hops", {}).items()},
+                    gold_files=d.get("gold_files")
+                    or ([d["gold_file"]] if d.get("gold_file") else []),
                 )
             )
         except (
@@ -549,6 +667,44 @@ def load_questions(path: Path) -> list[Question]:
     return out
 
 
+def reresolve_questions(db: Database, qs: list[Question]) -> list[Question]:
+    """Re-derive gold from the current index for questions taken from an
+    older report (cross-branch comparison): unit ids are index-specific, so
+    gold must be recomputed from the stored query/target/label. Questions
+    whose gold disappears (deleted symbols) are dropped."""
+    out: list[Question] = []
+    for q in qs:
+        rebuilt = Question(
+            query=q.query,
+            gold_file=q.gold_file,
+            label=q.label,
+            target=q.target,
+            depth=q.depth,
+        )
+        if q.label == "definition":
+            name = q.query.removeprefix("where is ").removesuffix(" defined").strip()
+            rows = db.conn.execute(
+                "SELECT id FROM units WHERE (qualname = ? OR name = ?) "
+                "AND unit_type NOT IN ('import', 'config_key') ORDER BY start_line LIMIT 1",
+                (name, name),
+            ).fetchall()
+            rebuilt.gold_unit_ids = [r["id"] for r in rows]
+        elif q.label in ("call", "alias") and q.target:
+            rebuilt.gold_unit_ids = sorted(
+                {row["unit"].id for row in db.callers(q.target, limit=100000)}
+            )
+        elif q.label == "transitive" and q.target:
+            hops = transitive_caller_ids(db, q.target, max_depth=q.depth or 3)
+            rebuilt.gold_unit_ids = list(hops)
+            rebuilt.gold_hops = hops
+        else:
+            rebuilt.gold_unit_ids = list(q.gold_unit_ids)
+            rebuilt.gold_files = list(q.gold_files or [])
+        if rebuilt.gold_unit_ids or rebuilt.gold_files:
+            out.append(rebuilt)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -556,16 +712,18 @@ def load_questions(path: Path) -> list[Question]:
 
 def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     gold_ids = set(q.gold_unit_ids)
-    gold_file = q.gold_file
+    gold_files = set(q.gold_files or ([q.gold_file] if q.gold_file else []))
     hits = run.hits[:top_k]
     hit_files = {h.file for h in hits}
     hit_unit_ids = {h.unit_id for h in hits if h.unit_id is not None}
+    for h in hits:
+        hit_unit_ids.update(h.unit_ids)
 
     unit_recall = len(hit_unit_ids & gold_ids) / len(gold_ids) if gold_ids else 0.0
-    file_recall = 1.0 if (gold_file and gold_file in hit_files) else 0.0
+    file_recall = len(hit_files & gold_files) / len(gold_files) if gold_files else 0.0
 
     relevant = hit_unit_ids & gold_ids if gold_ids else set()
-    precision = len(relevant) / len(hits) if hits else 0.0
+    precision = len(relevant) / len(hit_unit_ids) if hit_unit_ids else 0.0
 
     indirect_recall: float | None = None
     if q.gold_hops:
@@ -577,12 +735,12 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     mrr = 0.0
     if gold_ids:
         for i, h in enumerate(hits[:top_k]):
-            if h.unit_id in gold_ids:
+            if (h.unit_id in gold_ids) or (gold_ids & set(h.unit_ids)):
                 mrr = 1.0 / (i + 1)
                 break
-    elif gold_file:
+    elif gold_files:
         for i, h in enumerate(hits[:top_k]):
-            if h.file == gold_file:
+            if h.file in gold_files:
                 mrr = 1.0 / (i + 1)
                 break
     return {
@@ -597,24 +755,25 @@ def _metrics(run: SystemRun, q: Question, top_k: int) -> dict:
     }
 
 
-def aggregate(rows: list[dict]) -> dict:
-    if not rows:
+def aggregate(rows: list[dict | None]) -> dict:
+    present = [r for r in rows if r is not None]
+    if not present:
         return {}
-    lat = sorted(r["seconds"] for r in rows)
+    lat = sorted(r["seconds"] for r in present)
     n = len(lat)
 
     def _mean(key: str) -> float:
-        vals = [r[key] for r in rows if r.get(key) is not None]
+        vals = [r[key] for r in present if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else 0.0
 
     return {
         "n": n,
-        "unit_recall": sum(r["unit_recall"] for r in rows) / n,
-        "file_recall": sum(r["file_recall"] for r in rows) / n,
+        "unit_recall": sum(r["unit_recall"] for r in present) / n,
+        "file_recall": sum(r["file_recall"] for r in present) / n,
         "precision": _mean("precision"),
         "indirect_recall": _mean("indirect_recall"),
-        "mrr": sum(r["mrr"] for r in rows) / n,
-        "mean_tokens": sum(r["tokens"] for r in rows) / n,
+        "mrr": sum(r["mrr"] for r in present) / n,
+        "mean_tokens": sum(r["tokens"] for r in present) / n,
         "mean_sec": sum(lat) / n,
         "p50_sec": lat[(n - 1) // 2] if n else 0.0,
         "p95_sec": lat[int(math.ceil(0.95 * n)) - 1] if n else 0.0,
@@ -709,11 +868,16 @@ def _system_context(run: SystemRun, q: Question, db: Database, cfg: Config) -> s
     parts = []
     for h in run.hits:
         if h.unit_id is not None:
+            if h.detail:
+                parts.append(f"--- {h.file} (unit {h.unit_id}) ---\n{h.detail}")
+                continue
             ev = db.load_evidence(h.unit_id)
             if ev and "span" in ev:
                 parts.append(f"--- {h.file} (unit {h.unit_id}) ---\n{ev['span']}")
             else:
                 parts.append(f"- {h.file} (unit id {h.unit_id})")
+        elif h.detail:
+            parts.append(f"--- {h.file} ---\n{h.detail}")
         else:
             parts.append(f"- {h.file}")
     return "\n".join(parts) if parts else "(no context retrieved)"

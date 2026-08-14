@@ -51,6 +51,29 @@ jobs:
       - name: CLI smoke
         run: uv run urag --version
 
+  benchmark:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - name: Install
+        run: uv sync --group dev
+      - name: Benchmark fixture + self repo
+        run: uv run python benchmarks/run_bench.py --self --yes
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: |
+            benchmarks/reports/*.json
+            benchmarks/reports/*.html
+
   cross-platform:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     strategy:

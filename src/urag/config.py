@@ -51,6 +51,10 @@ SUPPORTED_LANGUAGES = {
     "c": {"ext": (".c", ".h"), "kind": "source"},
     "cpp": {"ext": (".cpp", ".cc", ".cxx", ".hpp", ".hh"), "kind": "source"},
     "csharp": {"ext": (".cs",), "kind": "source"},
+    "xml": {
+        "ext": (".xaml", ".axaml", ".xml", ".csproj", ".props", ".targets"),
+        "kind": "source",
+    },
     "markdown": {"ext": (".md", ".markdown", ".mdx"), "kind": "doc"},
     "json": {"ext": (".json",), "kind": "config"},
     "yaml": {"ext": (".yaml", ".yml"), "kind": "config"},

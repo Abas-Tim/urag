@@ -12,7 +12,9 @@ from .base import (
     Extractor,
     MAX_SUMMARY_CHARS,
     collapse_ws,
+    dedupe_refs,
     leading_comments,
+    split_callee,
     valid_aliases,
     walk_calls,
 )
@@ -85,7 +87,138 @@ class TsExtractor(Extractor):
         tree = _parser(self.language).parse(source.encode("utf-8"))
         out: list[CallSite] = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "new_expression":
+                first = next(
+                    (
+                        c
+                        for c in cur.named_children
+                        if c.type in ("identifier", "member_expression", "generic_type")
+                    ),
+                    None,
+                )
+                if first is not None:
+                    chain = source[first.start_byte : first.end_byte].split("<", 1)[0]
+                    out.append(
+                        CallSite(
+                            callee=split_callee(chain),
+                            callee_full=chain,
+                            line=cur.start_point.row + 1,
+                            byte_start=cur.start_byte,
+                            byte_end=cur.end_byte,
+                        )
+                    )
+            stack.extend(reversed(cur.named_children))
         return out
+
+    def collect_references(self, source: str) -> list:
+        """TS/JS: constructions, heritage (extends/implements), declared types
+        (fields, params, returns), casts (as), and generic arguments."""
+        import re
+
+        from ..models import Reference
+
+        source = ByteIndexedSource(source)
+        tree = _parser(self.language).parse(source.encode("utf-8"))
+        out: list[Reference] = []
+        containers = {
+            "promise",
+            "array",
+            "record",
+            "partial",
+            "required",
+            "readonly",
+            "pick",
+            "omit",
+            "returntype",
+            "parameters",
+            "constructorparameters",
+            "instanceof",
+            "awaited",
+            "exclude",
+            "extract",
+            "nonnullable",
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "symbol",
+            "any",
+            "unknown",
+            "never",
+            "void",
+            "undefined",
+            "null",
+            "bigint",
+        }
+
+        def append(node, kind: str) -> None:
+            if node is None:
+                return
+            text = source[node.start_byte : node.end_byte]
+            base = text.split("<", 1)[0]
+            names = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*", base)
+            if not names or names[-1] in containers:
+                return
+            out.append(
+                Reference(
+                    target=names[-1],
+                    target_full=text,
+                    kind=kind,
+                    line=node.start_point.row + 1,
+                    byte_start=node.start_byte,
+                    byte_end=node.end_byte,
+                )
+            )
+
+        def walk_type(node, kind: str) -> None:
+            if node is None:
+                return
+            if node.type == "type_annotation":
+                node = next(iter(node.named_children), None)
+            if node is None:
+                return
+            if node.type == "generic_type":
+                args = node.child_by_field_name("type_arguments") or next(
+                    (c for c in node.named_children if c.type == "type_arguments"),
+                    None,
+                )
+                if args is not None:
+                    for child in args.named_children:
+                        walk_type(child, "generic")
+            append(node, kind)
+
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            t = cur.type
+            if t == "new_expression":
+                first = next(
+                    (
+                        c
+                        for c in cur.named_children
+                        if c.type in ("identifier", "member_expression", "generic_type")
+                    ),
+                    None,
+                )
+                append(first, "construct")
+            elif t == "class_heritage":
+                for child in cur.named_children:
+                    if child.type in ("extends_clause", "implements_clause"):
+                        for part in child.named_children:
+                            if part.type != "type_arguments":
+                                append(part, "base")
+            elif t == "type_annotation":
+                walk_type(cur, "type")
+            elif t in ("as_expression", "satisfies_expression"):
+                right = cur.child_by_field_name("right") or (
+                    cur.named_children[-1] if cur.named_children else None
+                )
+                walk_type(right, "cast")
+            stack.extend(reversed(cur.named_children))
+        return dedupe_refs(out)
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """(alias, target): `import * as ns`, `import {A as B}`, `import D`,

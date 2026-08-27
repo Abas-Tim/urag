@@ -103,6 +103,7 @@ class RetrievedUnit:
     caller_of: str = ""
     call_line: int = 0
     hop: int = 0
+    ref_kind: str = ""
     resolved_target: str = ""
     evidence: str | None = None
 
@@ -128,6 +129,8 @@ class RetrievedUnit:
         if self.caller_of:
             d["calls"] = self.caller_of
             d["call_line"] = self.call_line
+        if self.ref_kind:
+            d["ref_kind"] = self.ref_kind
         if self.resolved_target:
             d["resolved_to"] = self.resolved_target
         if include_evidence and self.evidence is not None:
@@ -141,6 +144,20 @@ class CallSite:
 
     callee: str
     callee_full: str
+    line: int
+    byte_start: int
+    byte_end: int
+
+
+@dataclass
+class Reference:
+    """A symbol usage (not a call): type mention, construction, base class,
+    annotation, cast, attribute, XAML binding. `target` is the last segment
+    of the referenced name; `kind` distinguishes the usage form."""
+
+    target: str
+    target_full: str
+    kind: str
     line: int
     byte_start: int
     byte_end: int

@@ -39,20 +39,66 @@ _DOTTED = re.compile(r"^[a-zA-Z_][\w]*(\.[a-zA-Z_][\w]*)+$")
 _SNAKE = re.compile(r"^[a-zA-Z_]\w*_[\w]+$")
 _CAMEL = re.compile(r"^[A-Z][a-zA-Z0-9]*([a-z][A-Z]|[A-Z][a-z])[a-zA-Z0-9]*$")
 _UPPER = re.compile(r"^[A-Z][A-Z0-9_]{1,}$")
-_FILEPATH = re.compile(r"(^|[\s(])([a-zA-Z0-9_\-./]+\.(py|ts|js|tsx|jsx|go|rs|java|c|cc|cpp|h|hpp|md))\b")
+_FILEPATH = re.compile(
+    r"(^|[\s(])([a-zA-Z0-9_\-./]+\.(py|ts|js|tsx|jsx|go|rs|java|c|cc|cpp|h|hpp|md))\b"
+)
 _IMPACT_WORDS = (
-    "what calls", "who calls", "who uses", "what uses", "callers", "callees",
-    "dependencies", "depends on", "imports", "what breaks", "impact",
-    "blast radius", "downstream", "referenced by", "invoked by", "used by",
+    "what calls",
+    "who calls",
+    "who uses",
+    "what uses",
+    "callers",
+    "callees",
+    "dependencies",
+    "depends on",
+    "imports",
+    "what breaks",
+    "impact",
+    "blast radius",
+    "downstream",
+    "referenced by",
+    "invoked by",
+    "used by",
+    "references",
+    "reference",
+    "who mentions",
+    "is dead",
+    "dead code",
+    "unused",
+    "unreferenced",
 )
 _DEBUG_WORDS = (
-    "debug", "error", "crash", "fails", "failure", "broken", "exception",
-    "traceback", "segfault", "hang", "why is", "why does", "not working",
-    "cross-module", "across", "between", "flow from",
+    "debug",
+    "error",
+    "crash",
+    "fails",
+    "failure",
+    "broken",
+    "exception",
+    "traceback",
+    "segfault",
+    "hang",
+    "why is",
+    "why does",
+    "not working",
+    "cross-module",
+    "across",
+    "between",
+    "flow from",
 )
 _CONCEPT_WORDS = (
-    "architecture", "design", "how does", "how is", "explain", "overview",
-    "understand", "works", "mechanism", "lifecycle", "module", "system",
+    "architecture",
+    "design",
+    "how does",
+    "how is",
+    "explain",
+    "overview",
+    "understand",
+    "works",
+    "mechanism",
+    "lifecycle",
+    "module",
+    "system",
 )
 
 
@@ -61,7 +107,12 @@ def classify(query: str) -> str:
     lowered = q.lower()
     if len(q) < 2:
         return "local"
-    if _DOTTED.match(q) or _SNAKE.match(q) or _CAMEL.match(q) or _UPPER.match(q.split()[0] if q.split() else q):
+    if (
+        _DOTTED.match(q)
+        or _SNAKE.match(q)
+        or _CAMEL.match(q)
+        or _UPPER.match(q.split()[0] if q.split() else q)
+    ):
         return "symbol"
     if _FILEPATH.search(q):
         return "symbol"
@@ -73,7 +124,10 @@ def classify(query: str) -> str:
         return "local"
     if len(q.split()) <= 3:
         toks = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", q)
-        non_plain = any(_DOTTED.match(t) or _SNAKE.match(t) or _CAMEL.match(t) or _UPPER.match(t) for t in toks)
+        non_plain = any(
+            _DOTTED.match(t) or _SNAKE.match(t) or _CAMEL.match(t) or _UPPER.match(t)
+            for t in toks
+        )
         return "symbol" if non_plain else "local"
     return "local"
 

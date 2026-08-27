@@ -37,9 +37,13 @@ Token-conscious workflow:
    relevant hits to get exact source spans. Never request whole files.
 4. Browse files and symbols without search: `list_files`, `list_symbols`,
    `read_file`, `resolve` (exact definition), `children` (methods of a class).
-5. Ask impact questions precisely: `callers` (who calls X), `callees` (what X
+5. Ask impact questions precisely: `callers` (who calls X), `references`
+   (who uses/constructs/mentions X, including XAML markup), `callees` (what X
    calls), `dependents` (what imports X), and `recent_changes` (git state).
-6. `index_now` re-syncs after files change; `status` shows freshness.
+6. For dead-code hunts use `references` + `callers` per candidate, and
+   `dead_symbols` for a candidate list — then verify with grep before
+   removing anything. `index_now` re-syncs after files change; `status`
+   shows freshness.
 Filter by `language` when you know the stack (python, typescript, javascript).
 """
 
@@ -106,6 +110,8 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
     if r.caller_of:
         packet["calls"] = r.caller_of
         packet["call_line"] = r.call_line
+    if r.ref_kind:
+        packet["ref_kind"] = r.ref_kind
     if r.hop > 0:
         packet["hop"] = r.hop
     if r.resolved_target:
@@ -277,6 +283,79 @@ def create_server(root: Path | None = None) -> MCPServer:
                         "query": name,
                         "mode": "calls",
                         "depth": depth,
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="references",
+        title="Find who references a symbol",
+        description=(
+            "Usage-site lookup: returns the units that reference `name` — "
+            "type mentions, object constructions (new X()), base classes, "
+            "generic arguments, casts, attributes, and XAML bindings "
+            "(x:Class, DataType, {x:Static}, {StaticResource}, event "
+            "handlers). The precise way to answer 'who uses X' / 'is X "
+            "dead'. Each result carries the reference site line and its "
+            "kind. Pass depth > 1 to walk referencers-of-referencers."
+        ),
+    )
+    def references(name: str, limit: int = 30, depth: int = 1) -> str:
+        try:
+            with _database(cfg) as db:
+                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                if depth > 1:
+                    result = retriever.search_transitive_references(
+                        name, depth=depth, limit=limit
+                    )
+                else:
+                    result = retriever.search_references(name, limit=limit)
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "query": name,
+                        "mode": "references",
+                        "depth": depth,
+                        "count": len(packets),
+                        "results": packets,
+                    },
+                    ensure_ascii=False,
+                )
+        except IndexUnavailableError as exc:
+            return _error_response(exc)
+
+    @server.tool(
+        name="dead_symbols",
+        title="List candidate dead symbols",
+        description=(
+            "Heuristic dead-code candidates: symbol units (classes, methods, "
+            "functions, ...) with no incoming call edges and no incoming "
+            "reference edges. Excludes imports, config keys, and files under "
+            "test/spec paths. This is NOT proof of death — dynamic dispatch, "
+            "reflection, entry points, and unsupported file types can produce "
+            "false positives. Always verify candidates with the grep tool "
+            "before removing code."
+        ),
+    )
+    def dead_symbols(limit: int = 50, language: str | None = None) -> str:
+        try:
+            with _database(cfg) as db:
+                result = Retriever(cfg, db, _embedder(cfg), git).unreferenced(
+                    limit=limit, language=language
+                )
+                packets = [
+                    _packet(r, False, db, result.budget_tokens) for r in result.results
+                ]
+                return json.dumps(
+                    {
+                        "mode": "deadcode",
+                        "note": "heuristic candidates only — verify before removing",
                         "count": len(packets),
                         "results": packets,
                     },

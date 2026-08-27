@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MainWindow"
+        Loaded="OnLoaded">
+  <Window.Resources>
+    <BoolToVisibilityConverter x:Key="BoolToVis" />
+  </Window.Resources>
+  <StackPanel>
+    <TextBlock Text="{Binding Name}" />
+    <ItemsControl Items="{Binding Items}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate DataType="Item">
+          <Button Content="{Binding}" Command="{x:Static MainWindow.OpenCommand}" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</Window>

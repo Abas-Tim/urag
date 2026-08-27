@@ -34,13 +34,20 @@ urag search "TokenValidator.validate" --root <root> --mode lexical --top-k 3
 urag search "cache invalidation" --root <root> --mode dense --top-k 3
 urag callers validate --root <root>
 urag callers validate --root <root> --depth 3
+urag references MainWindow --root <root>
+urag references MainWindow --root <root> --depth 2
+urag deadcode --root <root>
 urag get <unit-id> --root <root>
+urag read README.md --start 10 --end 40 --root <root>
+urag read README.md 10 40 --root <root>
 urag index --root <root>
 ```
 
 `urag init` creates the project configuration and database. It does not run
 the initial full index unless `--full` is supplied. `urag watch --root <root>`
-keeps an existing index updated through debounced filesystem events.
+keeps an existing index updated through debounced filesystem events. A first
+full index can take minutes (local CPU embeddings). If it is interrupted, just
+run `urag index` again — it resumes where it stopped.
 
 Use `--json` for machine-readable search or caller results. Use
 `search --evidence` for trimmed source spans, or `get <unit-id>` for the full
@@ -95,6 +102,38 @@ static and approximate. Dynamic dispatch, reflection, generated code, and
 some instance-method chains are not resolved. Do not present the graph as a
 complete runtime dependency graph.
 
+## References And Dead Code
+
+`search` and `resolve` find *declarations*; the call graph finds *calls*.
+Neither covers usage sites like `new X()`, field/parameter/return types,
+base classes, casts, attributes, or XAML bindings. Use the reference index
+for "who uses X" and dead-code analysis:
+
+```bash
+urag references MainWindow --root <root>
+urag references BoolToVisibilityConverter --root <root>
+urag deadcode --root <root>
+```
+
+- `references <name>` returns every unit that mentions the symbol — type
+  mentions, constructions, bases, generic arguments, casts, attributes, and
+  XAML markup (element tags, `x:Class`, `DataType`, `{x:Static}`,
+  `{StaticResource}`, event handler attributes). Each result carries the
+  reference line and its `ref_kind`.
+- `callers` also matches constructions (`new MainWindow()`).
+- `deadcode` lists *candidate* dead symbols: units with no incoming calls
+  and no incoming references (imports, config keys, and test paths are
+  excluded). It is a heuristic: dynamic dispatch, reflection, markup
+  dialects it cannot parse, and external entry points can produce false
+  positives.
+
+For a dead-code hunt, the reliable workflow is:
+
+1. `urag deadcode` (or MCP `dead_symbols`) for the candidate list.
+2. `urag references <symbol>` + `urag callers <symbol>` per candidate.
+3. Verify each candidate with `git grep` (raw text, whole repo, including
+   markup files) before removing anything.
+
 ## MCP Tools
 
 Run the stdio server with:
@@ -113,6 +152,11 @@ The server exposes these tools:
   symbol metadata, indexed commit, and a stale status.
 - `fetch_units(unit_ids[], max_tokens?)` fetches several units in one call.
 - `callers(name, limit?, depth?)` returns direct or multi-hop caller packets.
+- `references(name, limit?, depth?)` returns who uses/constructs/mentions a
+  symbol, including XAML markup. Each result carries the site line and its
+  `ref_kind`. Depth > 1 walks referencers-of-referencers.
+- `dead_symbols(limit?, language?)` lists heuristic dead-code candidates
+  (no incoming calls or references). Verify with grep before removing.
 - `callees(unit_id)` returns what a unit calls (the inverse of callers).
 - `dependents(target, limit?)` returns the files that import a module/symbol.
 - `resolve(name, limit?)` returns exact symbol definitions by name/qualname.
@@ -154,10 +198,16 @@ search result, which keeps the normal response compact.
 Language-aware extractors cover Python, TypeScript, JavaScript, Go, Rust,
 Java, C, C++, and C#. They index functions, methods, classes or types,
 interfaces, enums, imports, signatures, documentation comments, source spans,
-and call sites according to the language. Markdown is indexed as heading-based
-document chunks. JSON, YAML, TOML, INI, and `.env` files are indexed as
-`config_key` units with dotted qualnames, so agents can answer "where is this
-setting" and "what env vars exist".
+and call sites according to the language, plus reference edges for type
+mentions, constructions, bases, generics, casts, and attributes. XML family
+files (`.xaml`, `.axaml`, `.xml`, `.csproj`, `.props`, `.targets`) are
+indexed as best-effort structural units: `x:Class` classes, `x:Key`
+resources, `DataTemplate` templates, event handlers, and markup references
+(`x:Class`, `DataType`, `{x:Static}`, `{StaticResource}`, element tags) feed
+the reference index so GUI markup is not a blind spot. Markdown is indexed as
+heading-based document chunks. JSON, YAML, TOML, INI, and `.env` files are
+indexed as `config_key` units with dotted qualnames, so agents can answer
+"where is this setting" and "what env vars exist".
 
 Files are filtered by project `.gitignore`, built-in exclusions, configured
 languages, and a default 1 MB file-size limit.
@@ -167,7 +217,9 @@ languages, and a default 1 MB file-size limit.
 Indexing is incremental and uses file metadata. In Git repositories, urag also
 records the commit used for each file and marks changed evidence as stale.
 Freshness detection is best-effort, so explicitly run `urag index` after a
-branch switch, pull, or large change.
+branch switch, pull, or large change. When the urag tool itself is upgraded,
+the next `urag index` re-extracts automatically so older indexes gain new
+capabilities (such as reference edges) without manual intervention.
 
 The default embedding provider is a local FastEmbed/ONNX model
 (`BAAI/bge-base-en-v1.5`, 768d). It downloads on first use and needs no API

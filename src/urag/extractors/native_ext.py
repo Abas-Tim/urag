@@ -19,6 +19,7 @@ from .base import (
     ByteIndexedSource,
     Extractor,
     collapse_ws,
+    dedupe_refs,
     leading_comments,
     split_callee,
     valid_aliases,
@@ -481,7 +482,108 @@ class JavaExtractor(Extractor):
         tree = _parser("java").parse(source.encode("utf-8"))
         out: list = []
         _walk_invocations(tree.root_node, source, out, {"method_invocation"})
+        from ..models import CallSite
+
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type == "object_creation_expression":
+                type_node = cur.child_by_field_name("type")
+                if type_node is not None:
+                    text = source[type_node.start_byte : type_node.end_byte]
+                    out.append(
+                        CallSite(
+                            callee=split_callee(text),
+                            callee_full=text,
+                            line=cur.start_point.row + 1,
+                            byte_start=cur.start_byte,
+                            byte_end=cur.end_byte,
+                        )
+                    )
+            stack.extend(reversed(cur.named_children))
         return out
+
+    def collect_references(self, source: str) -> list:
+        """Java: constructions, declared types, bases/interfaces, generics, casts."""
+        import re
+
+        from ..models import Reference
+
+        source = ByteIndexedSource(source)
+        tree = _parser("java").parse(source.encode("utf-8"))
+        out: list[Reference] = []
+        primitives = {
+            "boolean",
+            "byte",
+            "char",
+            "double",
+            "float",
+            "int",
+            "long",
+            "short",
+            "void",
+        }
+
+        def append(node, kind: str) -> None:
+            if node is None or node.type in (
+                "integral_type",
+                "floating_point_type",
+                "boolean_type",
+                "void_type",
+            ):
+                return
+            text = source[node.start_byte : node.end_byte]
+            base = text.split("<", 1)[0].strip()
+            names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", base)
+            if not names or names[-1] in primitives:
+                return
+            out.append(
+                Reference(
+                    target=names[-1],
+                    target_full=text,
+                    kind=kind,
+                    line=node.start_point.row + 1,
+                    byte_start=node.start_byte,
+                    byte_end=node.end_byte,
+                )
+            )
+
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            t = cur.type
+            if t == "object_creation_expression":
+                append(cur.child_by_field_name("type"), "construct")
+            elif t in (
+                "formal_parameter",
+                "field_declaration",
+                "method_declaration",
+                "local_variable_declaration",
+                "variable_declarator",
+                "cast_expression",
+                "type_cast",
+            ):
+                append(cur.child_by_field_name("type"), "type")
+            elif t == "class_declaration":
+                for field in ("superclass", "superinterfaces"):
+                    node = cur.child_by_field_name(field)
+                    if node is None:
+                        continue
+                    children = (
+                        node.named_children if field == "superinterfaces" else [node]
+                    )
+                    for child in children:
+                        append(child, "base")
+            elif t == "generic_type":
+                args = cur.child_by_field_name("type_arguments") or next(
+                    (c for c in cur.named_children if c.type == "type_arguments"),
+                    None,
+                )
+                if args is not None:
+                    for child in args.named_children:
+                        append(child, "generic")
+            stack.extend(reversed(cur.named_children))
+        return dedupe_refs(out)
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         source = ByteIndexedSource(source)
@@ -880,6 +982,7 @@ class CSharpExtractor(Extractor):
         stack: list[Node] = [tree.root_node]
         while stack:
             cur = stack.pop()
+            chain = None
             if cur.type == "invocation_expression":
                 first = cur.named_children[0] if cur.named_children else None
                 if first is not None:
@@ -887,22 +990,109 @@ class CSharpExtractor(Extractor):
                         chain = source[first.start_byte : first.end_byte]
                     elif first.type in ("identifier", "generic_name"):
                         chain = source[first.start_byte : first.end_byte]
-                    else:
-                        chain = None
-                    if chain:
-                        from ..models import CallSite
+            elif cur.type == "object_creation_expression":
+                type_node = cur.child_by_field_name("type")
+                if type_node is not None and type_node.type not in (
+                    "predefined_type",
+                    "implicit_type",
+                ):
+                    chain = source[type_node.start_byte : type_node.end_byte].split(
+                        "<", 1
+                    )[0]
+            if chain:
+                from ..models import CallSite
 
-                        out.append(
-                            CallSite(
-                                callee=split_callee(chain),
-                                callee_full=chain,
-                                line=cur.start_point.row + 1,
-                                byte_start=cur.start_byte,
-                                byte_end=cur.end_byte,
-                            )
-                        )
+                out.append(
+                    CallSite(
+                        callee=split_callee(chain),
+                        callee_full=chain,
+                        line=cur.start_point.row + 1,
+                        byte_start=cur.start_byte,
+                        byte_end=cur.end_byte,
+                    )
+                )
             stack.extend(reversed(cur.named_children))
         return out
+
+    def collect_references(self, source: str) -> list:
+        """Type references: constructions, declared types, bases, generics,
+        casts, typeof, attributes, x:Class-style bindings are handled by the
+        XML extractor."""
+        import re
+
+        import tree_sitter_c_sharp as tscs
+
+        from ..models import Reference
+
+        source = ByteIndexedSource(source)
+        p = Parser()
+        p.language = Language(tscs.language())
+        tree = p.parse(source.encode("utf-8"))
+        out: list = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            t = cur.type
+            if t == "base_list":
+                for child in cur.named_children:
+                    self._append_ref(out, child, source, "base")
+            elif t == "generic_name":
+                args = cur.child_by_field_name("type_arguments") or next(
+                    (c for c in cur.named_children if c.type == "type_argument_list"),
+                    None,
+                )
+                if args is not None:
+                    for child in args.named_children:
+                        self._append_ref(out, child, source, "generic")
+            elif t == "attribute":
+                self._append_ref(
+                    out, cur.child_by_field_name("name"), source, "attribute"
+                )
+            elif t == "object_creation_expression":
+                self._append_ref(
+                    out, cur.child_by_field_name("type"), source, "construct"
+                )
+            elif t in ("typeof_expression", "cast_expression", "declaration_pattern"):
+                self._append_ref(out, cur.child_by_field_name("type"), source, "cast")
+            elif t == "as_expression":
+                self._append_ref(out, cur.child_by_field_name("right"), source, "cast")
+            elif t in (
+                "variable_declaration",
+                "parameter",
+                "property_declaration",
+                "field_declaration",
+            ):
+                self._append_ref(out, cur.child_by_field_name("type"), source, "type")
+            elif t == "method_declaration":
+                self._append_ref(
+                    out, cur.child_by_field_name("returns"), source, "type"
+                )
+            stack.extend(reversed(cur.named_children))
+        return dedupe_refs(out)
+
+    @staticmethod
+    def _append_ref(out: list, node, source, kind: str) -> None:
+        import re
+
+        from ..models import Reference
+
+        if node is None or node.type in ("predefined_type", "implicit_type"):
+            return
+        text = source[node.start_byte : node.end_byte]
+        base = text.split("<", 1)[0].strip()
+        names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", base)
+        if not names:
+            return
+        out.append(
+            Reference(
+                target=names[-1],
+                target_full=text,
+                kind=kind,
+                line=node.start_point.row + 1,
+                byte_start=node.start_byte,
+                byte_end=node.end_byte,
+            )
+        )
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """`using Alias = Namespace.Type;` -> (Alias, Namespace.Type)."""

@@ -251,6 +251,9 @@ class Indexer:
                 self.db.replace_call_edges(file_id, edges, commit=False)
                 aliases = extractor.collect_import_aliases(text)
                 self.db.replace_import_aliases(file_id, aliases, commit=False)
+                refs = extractor.collect_references(text)
+                ref_edges = self._map_refs(units, refs)
+                self.db.replace_ref_edges(file_id, ref_edges, commit=False)
             self.db.conn.commit()
         except Exception:
             self.db.conn.rollback()
@@ -287,6 +290,7 @@ class Indexer:
             ).fetchall()
         )
         n = 0
+        t0 = time.monotonic()
         for i in range(0, len(units), BATCH):
             batch = units[i : i + BATCH]
             texts = [
@@ -318,7 +322,10 @@ class Indexer:
                 rows.append((u.id, lang_rows.get(u.file_id, ""), u.kind, v))
             self.db.store_embeddings(rows)
             n += len(batch)
-            self.progress(f"  embedded {n}/{len(units)}")
+            elapsed = time.monotonic() - t0
+            rate = n / elapsed if elapsed > 0 else 0.0
+            eta = (len(units) - n) / rate if rate > 0 else 0.0
+            self.progress(f"  embedded {n}/{len(units)} ({rate:.1f}/s, eta {eta:.0f}s)")
         return n
 
     # ---------- call graph ----------
@@ -326,7 +333,8 @@ class Indexer:
     def _map_calls(
         self, units: list[Unit], calls: list
     ) -> list[tuple[int, str, str, int]]:
-        """Map call sites to the innermost enclosing symbol unit."""
+        """Map call sites to the innermost enclosing symbol unit.
+        Returns (unit_id, callee, callee_full, line)."""
         funcs = sorted(
             [
                 u
@@ -343,13 +351,48 @@ class Indexer:
 
         for c in calls:
             idx = bisect.bisect_right(starts, c.byte_start) - 1
-            if idx >= 0:
+            while idx >= 0:
                 caller = funcs[idx]
                 if (
                     caller.id is not None
                     and caller.byte_start <= c.byte_start < caller.byte_end
                 ):
                     edges.append((caller.id, c.callee, c.callee_full, c.line))
+                    break
+                idx -= 1
+        return edges
+
+    def _map_refs(
+        self, units: list[Unit], refs: list
+    ) -> list[tuple[int, str, str, str, int]]:
+        """Map reference sites to the innermost enclosing symbol unit.
+        Returns (unit_id, ref, ref_full, kind, line)."""
+        funcs = sorted(
+            [
+                u
+                for u in units
+                if u.is_symbol
+                and u.unit_type not in ("import", "config_key")
+                and u.id is not None
+            ],
+            key=lambda u: u.byte_start,
+        )
+        edges: list[tuple[int, str, str, str, int]] = []
+        starts = [u.byte_start for u in funcs]
+        import bisect
+
+        for c in refs:
+            idx = bisect.bisect_right(starts, c.byte_start) - 1
+            while idx >= 0:
+                caller = funcs[idx]
+                if (
+                    caller.id is not None
+                    and caller.byte_start <= c.byte_start < caller.byte_end
+                ):
+                    edges.append((caller.id, c.target, c.target_full, c.kind, c.line))
+                    break
+                idx -= 1
+        return edges
         return edges
 
     def _resolve_call_edges(self, changed_file_ids: set[int] | None = None) -> None:
@@ -440,6 +483,36 @@ class Indexer:
             updates.append((target_id, edge["rowid"]))
         self.db.conn.executemany(
             "UPDATE call_edges SET callee_unit_id = ? WHERE rowid = ?", updates
+        )
+        ref_query = "SELECT rowid, file_id, ref, ref_full FROM ref_edges"
+        ref_params: list = []
+        if changed_file_ids is not None:
+            clauses = ["ref_unit_id IS NULL"]
+            if changed_file_ids:
+                marks = ",".join("?" for _ in changed_file_ids)
+                clauses.append(f"file_id IN ({marks})")
+                ref_params.extend(changed_file_ids)
+            if self._changed_symbol_names:
+                name_marks = ",".join("?" for _ in self._changed_symbol_names)
+                clauses.extend(
+                    (f"ref IN ({name_marks})", f"ref_full IN ({name_marks})")
+                )
+                clauses.append(
+                    "EXISTS ("
+                    "SELECT 1 FROM import_aliases ia "
+                    "WHERE ia.file_id = ref_edges.file_id"
+                    ")"
+                )
+                names = sorted(self._changed_symbol_names)
+                ref_params.extend(names)
+                ref_params.extend(names)
+            ref_query += " WHERE " + " OR ".join(clauses)
+        ref_updates = []
+        for edge in self.db.conn.execute(ref_query, ref_params).fetchall():
+            target_id = resolve(edge["file_id"], edge["ref"], edge["ref_full"])
+            ref_updates.append((target_id, edge["rowid"]))
+        self.db.conn.executemany(
+            "UPDATE ref_edges SET ref_unit_id = ? WHERE rowid = ?", ref_updates
         )
         self.db.conn.commit()
         self._changed_symbol_names.clear()

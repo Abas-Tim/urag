@@ -140,6 +140,8 @@ run a periodic full rescan with `--rescan 30`.
 | `urag resolve NAME` | Find an exact symbol definition by name |
 | `urag callers NAME` | Find direct callers of a symbol |
 | `urag callers NAME --depth 3` | Find callers through multiple call-graph hops |
+| `urag references NAME` | Find who references a symbol (types, constructions, bases, XAML) |
+| `urag deadcode` | List candidate dead symbols (no incoming calls or references) |
 | `urag callees UNIT_ID` | List what a unit calls (its call sites) |
 | `urag dependents NAME` | Find what imports (depends on) a module or symbol |
 | `urag symbols FILE` | List every indexed unit in a file |
@@ -218,6 +220,26 @@ reflection, generated code, and some instance-method chains are not resolved.
 The graph should be treated as impact evidence, not as a runtime dependency
 model.
 
+## References And Dead Code
+
+The index also stores *reference edges*: type mentions, object constructions,
+base classes, generic arguments, casts, attributes, and XAML bindings
+(element tags, `x:Class`, `DataType`, `{x:Static}`, `{StaticResource}`, and
+event handler attributes). This answers the questions a call graph cannot:
+
+```bash
+urag references MainWindow
+urag references BoolToVisibilityConverter
+urag deadcode
+urag search "what references TokenValidator"
+```
+
+`callers` also matches constructions (`new MainWindow()`). `deadcode` lists
+candidate symbols with no incoming calls or references — a heuristic that
+must be verified (e.g. with `git grep`) before code is removed, since
+dynamic dispatch, reflection, and unsupported markup dialects can produce
+false positives.
+
 ## Supported Languages
 
 | Language | Extensions | Extracted information |
@@ -230,7 +252,8 @@ model.
 | Java | `.java` | Methods, constructors, classes, interfaces, enums, imports, calls |
 | C | `.c`, `.h` | Functions, structs, unions, typedefs, includes, calls |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh` | Functions, methods, classes, structs, namespaces, includes, calls |
-| C# | `.cs` | Classes, interfaces, structs, records, enums, methods, usings, calls, aliases |
+| C# | `.cs` | Classes, interfaces, structs, records, enums, methods, usings, calls, aliases, references |
+| XML/XAML | `.xaml`, `.axaml`, `.xml`, `.csproj`, `.props`, `.targets` | `x:Class` classes, `x:Key` resources, `DataTemplate` templates, event handlers, markup references |
 | Markdown | `.md`, `.markdown`, `.mdx` | Heading-based document chunks and hierarchy |
 | JSON | `.json` | `config_key` units with dotted qualnames |
 | YAML | `.yaml`, `.yml` | `config_key` units with dotted qualnames |

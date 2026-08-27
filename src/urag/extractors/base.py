@@ -34,6 +34,11 @@ class Extractor(ABC):
         """Collect call sites. Default: no calls known."""
         return []
 
+    def collect_references(self, source: str) -> list:
+        """Collect symbol references (type mentions, constructions, bases,
+        annotations, casts, attributes). Default: none known."""
+        return []
+
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """Import bindings (alias, fully-qualified target). Default: none."""
         return []
@@ -95,6 +100,19 @@ def collapse_ws(text: str, max_len: int = 300) -> str:
     """Collapse whitespace/newlines in a signature into a single line."""
     out = " ".join(text.split())
     return out[:max_len]
+
+
+def dedupe_refs(refs: list) -> list:
+    """Drop duplicate references at the same (line, byte_start, kind, target)."""
+    seen: set[tuple[int, int, str, str]] = set()
+    out = []
+    for ref in refs:
+        key = (ref.line, ref.byte_start, ref.kind, ref.target)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ref)
+    return out
 
 
 def _is_comment_line(line: str, marker: str) -> bool:

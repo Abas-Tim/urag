@@ -241,22 +241,44 @@ class Retriever:
                     )
                     else 1
                 )
-                hits = (
-                    self.db.transitive_callers(
-                        target, max_depth=depth, limit=max(k * 3, 10)
+                reference_intent = any(
+                    phrase in query.lower()
+                    for phrase in (
+                        "reference",
+                        "mention",
+                        "use ",
+                        "uses",
+                        "used by",
                     )
-                    if depth > 1
-                    else self.db.callers(target, limit=max(k * 3, 10))
                 )
+                if reference_intent:
+                    hits = (
+                        self.db.transitive_references(
+                            target, max_depth=depth, limit=max(k * 3, 10)
+                        )
+                        if depth > 1
+                        else self.db.references(target, limit=max(k * 3, 10))
+                    )
+                else:
+                    hits = (
+                        self.db.transitive_callers(
+                            target, max_depth=depth, limit=max(k * 3, 10)
+                        )
+                        if depth > 1
+                        else self.db.callers(target, limit=max(k * 3, 10))
+                    )
                 if hits:
                     results = [
                         RetrievedUnit(
                             h["unit"],
                             h["path"],
                             score=1.0,
-                            caller_of=h["callee_full"] or target,
+                            caller_of=h.get("callee_full")
+                            or h.get("ref_full")
+                            or target,
                             call_line=h["line"],
                             hop=h.get("hop", 0),
+                            ref_kind=h.get("kind", ""),
                             resolved_target=h.get("resolved_target", ""),
                         )
                         for h in hits
@@ -522,6 +544,77 @@ class Retriever:
             results,
             "calls",
             f"transitive callers of {name} (depth {depth})",
+            "impact",
+            budget,
+        )
+
+    def search_references(self, name: str, limit: int = 30) -> SearchResult:
+        """Direct reference lookup: who mentions/constructs/derives `name`."""
+        hits = self.db.references(name, limit=limit)
+        results = [
+            RetrievedUnit(
+                h["unit"],
+                h["path"],
+                score=1.0,
+                caller_of=h["ref_full"] or name,
+                call_line=h["line"],
+                ref_kind=h.get("kind", ""),
+                resolved_target=h.get("resolved_target", ""),
+            )
+            for h in hits
+        ]
+        self._enrich(results)
+        budget = self._impact_budget()
+        return SearchResult(
+            results, "references", f"references to {name}", "impact", budget
+        )
+
+    def search_transitive_references(
+        self, name: str, depth: int = 3, limit: int = 30
+    ) -> SearchResult:
+        """Multi-hop reference lookup: referencers-of-referencers."""
+        hits = self.db.transitive_references(name, max_depth=depth, limit=limit)
+        results = [
+            RetrievedUnit(
+                h["unit"],
+                h["path"],
+                score=1.0,
+                caller_of=h["ref_full"] or name,
+                call_line=h["line"],
+                hop=h.get("hop", 0),
+                resolved_target=h.get("resolved_target", ""),
+            )
+            for h in hits
+        ]
+        self._enrich(results)
+        budget = self._impact_budget()
+        return SearchResult(
+            results,
+            "references",
+            f"transitive references to {name} (depth {depth})",
+            "impact",
+            budget,
+        )
+
+    def unreferenced(
+        self, limit: int = 50, language: str | None = None
+    ) -> SearchResult:
+        """Candidate dead symbols: no incoming calls and no incoming references."""
+        hits = self.db.unreferenced_symbols(limit=limit, language=language)
+        results = [
+            RetrievedUnit(
+                h["unit"],
+                h["path"],
+                score=1.0,
+            )
+            for h in hits
+        ]
+        self._enrich(results)
+        budget = self._impact_budget()
+        return SearchResult(
+            results,
+            "deadcode",
+            f"unreferenced symbols (limit {limit})",
             "impact",
             budget,
         )

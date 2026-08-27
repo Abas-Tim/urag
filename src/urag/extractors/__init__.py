@@ -7,6 +7,7 @@ from .python_ext import PythonExtractor
 from .ts_ext import TsExtractor
 from .markdown_ext import MarkdownExtractor
 from .config_ext import ConfigExtractor
+from .xml_ext import XmlExtractor
 from .native_ext import (
     GoExtractor,
     RustExtractor,
@@ -32,6 +33,7 @@ _REGISTRY: dict[str, Extractor] = {
     "c": CExtractor("c"),
     "cpp": CExtractor("cpp"),
     "csharp": CSharpExtractor(),
+    "xml": XmlExtractor(),
 }
 
 

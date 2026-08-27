@@ -13,6 +13,7 @@ from .base import (
     Extractor,
     MAX_SUMMARY_CHARS,
     collapse_ws,
+    dedupe_refs,
     valid_aliases,
     walk_calls,
 )
@@ -88,6 +89,111 @@ class PythonExtractor(Extractor):
         out: list[CallSite] = []
         walk_calls(tree.root_node, source, {"call"}, out)
         return out
+
+    def collect_references(self, source: str) -> list:
+        """Python: class bases, type annotations, isinstance/issubclass casts,
+        and identifiers inside subscripted annotations."""
+        import re
+
+        from ..models import Reference
+
+        source = ByteIndexedSource(source)
+        tree = _parser().parse(source.encode("utf-8"))
+        out: list[Reference] = []
+        containers = {
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "frozenset",
+            "optional",
+            "union",
+            "callable",
+            "iterable",
+            "iterator",
+            "sequence",
+            "mapping",
+            "mutablemapping",
+            "type",
+            "literal",
+            "annotated",
+            "final",
+            "classvar",
+            "typing",
+            "collections",
+            "bool",
+            "int",
+            "float",
+            "str",
+            "bytes",
+            "bytearray",
+            "object",
+            "none",
+        }
+
+        def append(node, kind: str) -> None:
+            if node is None or node.type not in ("identifier", "attribute"):
+                return
+            text = source[node.start_byte : node.end_byte]
+            base = text.split("[", 1)[0]
+            names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", base)
+            if not names or names[-1].lower() in containers:
+                return
+            out.append(
+                Reference(
+                    target=names[-1],
+                    target_full=text,
+                    kind=kind,
+                    line=node.start_point.row + 1,
+                    byte_start=node.start_byte,
+                    byte_end=node.end_byte,
+                )
+            )
+
+        def walk_type(node, kind: str) -> None:
+            if node is None:
+                return
+            if node.type == "type":
+                node = next(iter(node.named_children), None)
+            if node is None:
+                return
+            if node.type == "subscript":
+                for child in node.named_children:
+                    walk_type(child, kind)
+                return
+            if node.type in ("union_type", "intersection_type"):
+                for child in node.named_children:
+                    walk_type(child, kind)
+                return
+            append(node, kind)
+
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            t = cur.type
+            if t == "class_definition":
+                supers = cur.child_by_field_name("superclasses") or next(
+                    (c for c in cur.named_children if c.type == "argument_list"),
+                    None,
+                )
+                if supers is not None:
+                    for child in supers.named_children:
+                        if child.type in ("identifier", "attribute"):
+                            append(child, "base")
+            elif t in ("typed_parameter", "typed_default_parameter", "assignment"):
+                walk_type(cur.child_by_field_name("type"), "type")
+            elif t == "function_definition":
+                walk_type(cur.child_by_field_name("return_type"), "type")
+            elif t == "call":
+                fn = cur.child_by_field_name("function")
+                if fn is not None and fn.type == "identifier":
+                    name = source[fn.start_byte : fn.end_byte]
+                    if name in ("isinstance", "issubclass"):
+                        args = cur.child_by_field_name("arguments")
+                        if args is not None and len(args.named_children) >= 2:
+                            walk_type(args.named_children[1], "cast")
+            stack.extend(reversed(cur.named_children))
+        return dedupe_refs(out)
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """(alias, fully-qualified target) for `import x as y`, `from m import n`

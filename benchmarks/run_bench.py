@@ -96,6 +96,7 @@ def bench(
     root: Path,
     transitive: int,
     alias: int,
+    reference: int,
     autogen: int | None,
     top_k: int,
     systems: str,
@@ -149,6 +150,8 @@ def bench(
             args += ["--transitive", str(transitive)]
         if alias:
             args += ["--alias", str(alias)]
+        if reference:
+            args += ["--reference", str(reference)]
     print(f"[bench] eval {root} ({' '.join(args[1:])})")
     r = urag_sh(args, ROOT)
     if r.returncode != 0:
@@ -233,6 +236,7 @@ def main() -> None:
     )
     ap.add_argument("--transitive", type=int, default=25)
     ap.add_argument("--alias", type=int, default=25)
+    ap.add_argument("--reference", type=int, default=25)
     ap.add_argument(
         "--autogen",
         type=int,
@@ -242,7 +246,7 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument(
         "--systems",
-        default="urag-auto,urag-hybrid,urag-lexical,urag-callers,urag-transitive,rg,read",
+        default="urag-auto,urag-hybrid,urag-lexical,urag-callers,urag-transitive,urag-references,rg,read",
     )
     ap.add_argument(
         "--reuse-questions",
@@ -309,6 +313,7 @@ def main() -> None:
             root,
             args.transitive,
             args.alias,
+            args.reference,
             args.autogen,
             args.top_k,
             args.systems,

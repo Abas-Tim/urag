@@ -525,6 +525,33 @@ def autogen_transitive_questions(
     return qs
 
 
+def autogen_reference_questions(db: Database, n: int) -> list[Question]:
+    """Questions whose gold = ALL units referencing a symbol (ref_edges)."""
+    rows = db.conn.execute(
+        """
+        SELECT e.ref, GROUP_CONCAT(DISTINCT e.unit_id) AS refs
+        FROM ref_edges e GROUP BY e.ref ORDER BY e.ref
+        """,
+    ).fetchall()
+    qs: list[Question] = []
+    for r in _seeded_shuffle(rows):
+        ref = r["ref"]
+        if not ref or ref == "anonymous":
+            continue
+        ids = [int(x) for x in r["refs"].split(",")]
+        qs.append(
+            Question(
+                query=f"what references {ref}",
+                gold_unit_ids=ids,
+                label="reference",
+                target=ref,
+            )
+        )
+        if len(qs) >= n:
+            break
+    return qs
+
+
 def scan_import_aliases(source: str, language: str) -> dict[str, str]:
     """alias -> fully-qualified target, from source text (harness-independent)."""
     aliases: dict[str, str] = {}

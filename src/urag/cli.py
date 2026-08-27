@@ -58,10 +58,25 @@ def _root_callback(
 _embedder_cache: dict[str, Embedder] = {}
 
 
+def _flush_progress(msg: str) -> None:
+    """Print an index progress line and flush it immediately so agent
+    harnesses see output while long runs are still going."""
+    console.print(msg)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def _embedder(cfg: Config) -> Embedder:
     key = f"{cfg.embedding.provider}:{cfg.embedding.model}:{cfg.embedding.dimension}"
     if key in _embedder_cache:
         return _embedder_cache[key]
+    if cfg.embedding.provider == "local":
+        _flush_progress(
+            f"[dim]loading embedding model {cfg.embedding.model} "
+            "(first run downloads it, may take a while)...[/dim]"
+        )
     try:
         emb = create_embedder(cfg.embedding)
     except Exception as exc:
@@ -108,8 +123,14 @@ def init(
     console.print(f"config: {cfg.config_path}")
     if full:
         embedder = NoopEmbedder() if no_embed else _embedder(cfg)
-        indexer = Indexer(cfg, db, embedder, progress=lambda m: console.print(m))
+        indexer = Indexer(cfg, db, embedder, progress=_flush_progress)
+        _flush_progress(f"[dim]indexing {root}...[/dim]")
         indexer.index_all()
+        console.print(
+            "[dim]a first full index can take minutes (local CPU embeddings). "
+            "Interrupted? Just run `urag index` again — it resumes where it "
+            "stopped.[/dim]"
+        )
     db.close()
 
 
@@ -242,7 +263,8 @@ def index(
     """Incrementally index changed files (full pass on first run)."""
     cfg, db = _engine(root)
     embedder = NoopEmbedder() if no_embed else _embedder(cfg)
-    indexer = Indexer(cfg, db, embedder, progress=lambda m: console.print(m))
+    indexer = Indexer(cfg, db, embedder, progress=_flush_progress)
+    _flush_progress(f"[dim]indexing {cfg.project_root}...[/dim]")
     indexer.index_all()
     db.close()
 
@@ -256,7 +278,7 @@ def watch(
 ):
     """Continuously re-index on file changes."""
     cfg, db = _engine(root)
-    indexer = Indexer(cfg, db, _embedder(cfg), progress=lambda m: console.print(m))
+    indexer = Indexer(cfg, db, _embedder(cfg), progress=_flush_progress)
     run_watch(cfg, indexer, rescan_minutes=rescan_minutes)
     db.close()
 
@@ -361,6 +383,11 @@ def eval_cmd(
         "--alias",
         help="add N import-alias resolution questions with provable gold",
     ),
+    reference: Optional[int] = typer.Option(
+        None,
+        "--reference",
+        help="add N reference questions with provable gold",
+    ),
     top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
     systems: Optional[str] = typer.Option(
         None,
@@ -402,6 +429,7 @@ def eval_cmd(
         aggregate,
         autogen_alias_questions,
         autogen_questions,
+        autogen_reference_questions,
         autogen_transitive_questions,
         judge_results,
         load_questions,
@@ -429,6 +457,8 @@ def eval_cmd(
             qs += autogen_transitive_questions(db, transitive)
         if alias:
             qs += autogen_alias_questions(db, cfg.project_root, alias)
+        if reference:
+            qs += autogen_reference_questions(db, reference)
         qs = [resolve_question(db, q) for q in qs]
 
         chosen = (systems or "urag-auto,urag-hybrid,urag-lexical,rg,chunk").split(",")
@@ -523,6 +553,13 @@ def eval_cmd(
                             )
                         ),
                     )
+            if q.target and "urag-references" in chosen:
+                runs["urag-references"] = safe_run(
+                    "urag-references",
+                    lambda: urag_run(
+                        retriever.search_references(q.target, limit=top_k)
+                    ),
+                )
             if "oracle" in chosen:
                 runs["oracle"] = safe_run("oracle", lambda: oracle.search(q, db))
             for name, run in runs.items():
@@ -653,6 +690,88 @@ def callers(
                 console.print(f"  [cyan]hop {r.hop}[/cyan]")
             if r.resolved_target:
                 console.print(f"  [cyan]via alias -> {r.resolved_target}[/cyan]")
+    finally:
+        db.close()
+
+
+@app.command()
+def references(
+    name: str = typer.Argument(..., help="symbol name to find references of"),
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    depth: int = typer.Option(
+        1,
+        "--depth",
+        min=1,
+        help="hop depth; 1 = direct referencers, >1 = referencers-of-referencers",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """Who references a symbol? Type mentions, constructions, bases, XAML."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        if depth > 1:
+            result = retriever.search_transitive_references(
+                name, depth=depth, limit=top_k or 30
+            )
+        else:
+            result = retriever.search_references(name, limit=top_k or 30)
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print(f"[yellow]no references found for {name}[/yellow]")
+            return
+        for r in result.results:
+            u = r.unit
+            console.print(
+                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
+            )
+            console.print(
+                f"  [green]references {r.caller_of} at line {r.call_line} ({r.ref_kind})[/green]"
+            )
+            if r.hop > 1:
+                console.print(f"  [cyan]hop {r.hop}[/cyan]")
+            if r.resolved_target:
+                console.print(f"  [cyan]via alias -> {r.resolved_target}[/cyan]")
+    finally:
+        db.close()
+
+
+@app.command()
+def deadcode(
+    root: Path = typer.Option(".", help="project root"),
+    top_k: Optional[int] = typer.Option(None, "--top-k"),
+    language: Optional[str] = typer.Option(
+        None, "--language", help="filter by language"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
+    """List candidate dead symbols (no incoming calls or references)."""
+    from .git_aware import Git
+
+    cfg, db = _engine(root)
+    try:
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).unreferenced(
+            limit=top_k or 50, language=language
+        )
+        if json_out:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            return
+        if not result.results:
+            console.print("[green]no unreferenced symbols found[/green]")
+            return
+        console.print(
+            "[dim]heuristic candidates only — verify with git grep before removing[/dim]"
+        )
+        for r in result.results:
+            u = r.unit
+            console.print(
+                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{r.file_path}:{u.start_line}-{u.end_line}[/dim]"
+            )
     finally:
         db.close()
 
@@ -847,8 +966,16 @@ def symbols_cmd(
 def read_cmd(
     path: str = typer.Argument(..., help="project-relative file path"),
     root: Path = typer.Option(".", help="project root"),
-    start: Optional[int] = typer.Option(None, "--start", help="first line (1-based)"),
-    end: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
+    start: Optional[int] = typer.Argument(
+        None, help="first line (1-based); also available as --start"
+    ),
+    end: Optional[int] = typer.Argument(
+        None, help="last line (inclusive); also available as --end"
+    ),
+    start_opt: Optional[int] = typer.Option(
+        None, "--start", help="first line (1-based)"
+    ),
+    end_opt: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
 ):
     """Read a file (or a line range) from the project."""
     from .git_aware import Git
@@ -856,7 +983,9 @@ def read_cmd(
     cfg, db = _engine(root)
     try:
         result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).read_file(
-            path, start=start, end=end
+            path,
+            start=start_opt if start_opt is not None else start,
+            end=end_opt if end_opt is not None else end,
         )
         if "error" in result:
             error_console.print(f"[yellow]{result['error']}[/yellow]")

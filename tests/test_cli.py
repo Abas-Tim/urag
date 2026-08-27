@@ -28,6 +28,7 @@ def test_get_missing_unit_exits_without_traceback(tmp_path):
 
 def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
     cfg = load_config(tmp_path)
+    cfg.embedding.provider = "local"
     cli._embedder_cache.clear()
 
     def fail(_cfg):
@@ -38,4 +39,4 @@ def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
 
     assert "embedding unavailable" in captured.err
-    assert captured.out == ""
+    assert "loading embedding model" in captured.out

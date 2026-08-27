@@ -122,6 +122,19 @@ def test_classify_impact():
 def test_impact_symbol():
     assert Retriever._impact_symbol("what calls TokenValidator") == "TokenValidator"
     assert Retriever._impact_symbol("who uses validate") == "validate"
+    assert Retriever._impact_symbol("what calls Add") == "Add"
+    assert Retriever._impact_symbol("what calls Remove") == "Remove"
+    assert (
+        Retriever._impact_symbol("what calls verbs_cq->get_cq_buf")
+        == "verbs_cq->get_cq_buf"
+    )
+    assert (
+        Retriever._impact_symbol("what calls Entity<OrderItem>") == "Entity<OrderItem>"
+    )
+    assert (
+        Retriever._impact_symbol("what calls Entity<OrderItem, Customer>")
+        == "Entity<OrderItem, Customer>"
+    )
     assert (
         Retriever._impact_symbol("what breaks if I change parse_token") == "parse_token"
     )

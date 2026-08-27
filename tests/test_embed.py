@@ -1,3 +1,5 @@
+import re
+
 import pytest
 import urag.cli as cli
 from typer.testing import CliRunner
@@ -79,7 +81,8 @@ def test_embed_unknown_model_requires_dimension(tmp_path, monkeypatch):
         ["embed", "--root", str(tmp_path), "--model", "org/custom-model"],
     )
     assert result.exit_code != 0
-    assert "--dimension" in result.output
+    output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.output)
+    assert "--dimension" in output
 
 
 def test_embed_switch_purges_old_model_cache(tmp_path, monkeypatch):

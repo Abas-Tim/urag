@@ -68,6 +68,40 @@ def _flush_progress(msg: str) -> None:
         pass
 
 
+_XML_FAMILY_EXTS = (".xaml", ".axaml", ".xml", ".csproj", ".props", ".targets")
+
+
+def _find_xml_family_files(cfg: Config, cap: int = 1000) -> int:
+    """Count XML-family files under the project root, pruning excluded and
+    hidden directories. Cheap existence check for the doctor hint."""
+    import os
+
+    skip = {
+        ".git",
+        ".hg",
+        ".svn",
+        ".urag",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        "obj",
+        "bin",
+        ".venv",
+        "venv",
+        "__pycache__",
+    }
+    found = 0
+    for dirpath, dirnames, filenames in os.walk(cfg.project_root):
+        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
+        for name in filenames:
+            if name.lower().endswith(_XML_FAMILY_EXTS):
+                found += 1
+                if found >= cap:
+                    return found
+    return found
+
+
 def _embedder(cfg: Config) -> Embedder:
     key = f"{cfg.embedding.provider}:{cfg.embedding.model}:{cfg.embedding.dimension}"
     if key in _embedder_cache:
@@ -1066,6 +1100,14 @@ def doctor(root: Path = typer.Option(".", help="project root")):
     db.close()
     console.print(f"[bold]project:[/bold] {cfg.project_root}")
     console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    if "xml" not in cfg.index.languages:
+        xml_hits = _find_xml_family_files(cfg)
+        if xml_hits:
+            console.print(
+                f"[yellow]hint: {xml_hits} XML-family file(s) found but 'xml' is not in "
+                "index.languages (config predates XAML support); add it to "
+                ".urag/urag.toml and re-run `urag index` to close the markup blind spot[/yellow]"
+            )
     if cfg.embedding.provider == "local":
         cache = default_model_cache_dir()
         console.print(f"[bold]model cache:[/bold] {cache}")

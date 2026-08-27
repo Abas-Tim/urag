@@ -471,6 +471,29 @@ The traversal is breadth-first, cycle-safe, and reports the shortest hop for a
 unit. It is a static call graph, so it does not guarantee runtime-complete
 dispatch or reflection analysis.
 
+## 8b. Ask A Reference Question
+
+Calls do not cover every usage. `new TokenValidator()`, a field or parameter
+typed `TokenValidator`, a base class, a cast, an attribute, or a XAML binding
+(`x:Class`, `{x:Static}`, an element tag, an event handler) are *references*,
+stored in a parallel reference index during indexing:
+
+```bash
+urag references TokenValidator --root /path/to/demo-project
+urag search "what references TokenValidator"
+```
+
+Each result packet carries the reference-site line and its `ref_kind`
+(`construct`, `type`, `base`, `generic`, `cast`, `attribute`, `xaml_type`,
+`xaml_member`, `xaml_event`, `xaml_resource`). `urag references` also accepts
+`--depth` for referencers-of-referencers, and `callers` matches object
+constructions (`new X()`) as well as invocations.
+
+For dead-code analysis, `urag deadcode` lists candidate symbols with no
+incoming calls and no incoming references. It is a heuristic: framework
+hooks, dynamic dispatch, reflection, and markup dialects the index cannot
+parse still require confirmation with `git grep` before removal.
+
 ## 9. Alias-Aware Queries
 
 The example imports `validate_token` without writing the module path at the

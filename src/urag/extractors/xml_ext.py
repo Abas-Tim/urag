@@ -94,6 +94,7 @@ _CONTROL_TAGS = {
     "datagrid",
     "datatemplate",
     "dockpanel",
+    "dragdrop",
     "ellipse",
     "expander",
     "flyout",
@@ -253,6 +254,12 @@ class XmlExtractor(Extractor):
                     if ref is not None:
                         out.append(ref)
                     cursor = self._advance(source, cursor, value)
+                owner = self._attached_owner(attr)
+                if owner:
+                    ref = self._ref(source, offsets, owner, "xaml_member", cursor)
+                    if ref is not None:
+                        out.append(ref)
+                    cursor = self._advance(source, cursor, owner)
                 for pattern, kind in (
                     (_XSTATIC_RE, "xaml_member"),
                     (_XTYPE_RE, "xaml_type"),
@@ -274,6 +281,20 @@ class XmlExtractor(Extractor):
     @staticmethod
     def _local(tag: str) -> str:
         return tag.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+
+    @staticmethod
+    def _attached_owner(attr: str) -> str | None:
+        """Owner type of an attached-property attribute
+        (`behaviors:DragDropBehavior.EnableDragDrop` -> DragDropBehavior)."""
+        text = attr.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+        if "." not in text:
+            return None
+        owner = text.split(".", 1)[0]
+        if not owner or not re.fullmatch(r"[A-Za-z_][\w]*", owner):
+            return None
+        if not owner[0].isupper() or owner.lower() in _CONTROL_TAGS:
+            return None
+        return owner
 
     @staticmethod
     def _advance(source: str, cursor: int, needle: str) -> int:

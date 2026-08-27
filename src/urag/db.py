@@ -224,6 +224,10 @@ class Database:
         )
         if rebuild_fts:
             c.execute("INSERT INTO fts_units(fts_units) VALUES ('rebuild')")
+        if not self.get_meta("ref_edges_v1"):
+            self.set_meta("ref_edges_v1", "1")
+            if c.execute("SELECT COUNT(*) FROM units").fetchone()[0]:
+                self.set_meta("refs_pending", "1")
         c.commit()
 
     def set_meta(self, key: str, value: str) -> None:

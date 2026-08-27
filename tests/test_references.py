@@ -170,6 +170,19 @@ def test_xaml_references():
     assert ("StackPanel", "xaml_type") not in kinds
 
 
+def test_xaml_attached_property_reference():
+    src = (
+        '<Window xmlns:b="urn:behaviors">\n'
+        '  <Grid b:DragDropBehavior.EnableDragDrop="True" DragDrop.AllowDrop="True">\n'
+        "  </Grid>\n"
+        "</Window>\n"
+    )
+    refs = XmlExtractor().collect_references(src)
+    kinds = {(r.target, r.kind) for r in refs}
+    assert ("DragDropBehavior", "xaml_member") in kinds
+    assert ("DragDrop", "xaml_member") not in kinds
+
+
 # ---------------------------------------------------------------------------
 # end-to-end index: references, callers-via-construction, deadcode
 # ---------------------------------------------------------------------------
@@ -343,3 +356,29 @@ def test_cli_read_positional_range(tmp_path):
     assert result.exit_code == 0
     assert "two\nthree" in result.output
     assert "four" not in result.output
+
+
+def test_old_index_migrates_ref_edges(tmp_path):
+    """Indexes built before ref_edges get reference edges on the next
+    `index` run without any file changes."""
+    cfg = load_config(tmp_path)
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    (tmp_path / "mvc.cs").write_text(
+        "class A { void Run() { var b = new B(); } }\nclass B {}\n",
+        encoding="utf-8",
+    )
+    Indexer(cfg, db, NoopEmbedder()).index_all()
+    db.conn.execute("DELETE FROM ref_edges")
+    db.delete_meta("ref_edges_v1")
+    db.conn.commit()
+    db.close()
+
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        rows = db.conn.execute("SELECT ref FROM ref_edges").fetchall()
+        refs = {r["ref"] for r in rows}
+        assert "B" in refs
+        assert db.get_meta("refs_pending") == ""
+    finally:
+        db.close()

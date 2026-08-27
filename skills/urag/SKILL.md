@@ -217,7 +217,9 @@ languages, and a default 1 MB file-size limit.
 Indexing is incremental and uses file metadata. In Git repositories, urag also
 records the commit used for each file and marks changed evidence as stale.
 Freshness detection is best-effort, so explicitly run `urag index` after a
-branch switch, pull, or large change.
+branch switch, pull, or large change. When the urag tool itself is upgraded,
+the next `urag index` re-extracts automatically so older indexes gain new
+capabilities (such as reference edges) without manual intervention.
 
 The default embedding provider is a local FastEmbed/ONNX model
 (`BAAI/bge-base-en-v1.5`, 768d). It downloads on first use and needs no API

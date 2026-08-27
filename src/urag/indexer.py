@@ -20,6 +20,10 @@ from .models import SourceFile, Unit
 
 BATCH = 64
 
+# Bump when extraction semantics change; existing indexes are fully
+# re-extracted (embeddings for unchanged retrieval keys are preserved).
+EXTRACTOR_VERSION = "2"
+
 Progress = Callable[[str], None]
 
 
@@ -117,7 +121,18 @@ class Indexer:
         if deleted:
             self.db.delete_files(sorted(deleted))
             self.progress(f"removed {len(deleted)} deleted file(s)")
-        changed = [f for f in files if self._needs_reindex(f)]
+        force = False
+        if self.db.get_meta("refs_pending") == "1":
+            # index predates ref_edges: re-extract everything once so
+            # reference edges exist for unchanged files too.
+            self.db.delete_meta("refs_pending")
+            self.progress("upgrading index: extracting reference edges")
+            force = True
+        if self.db.get_meta("extractor_version") != EXTRACTOR_VERSION:
+            self.db.set_meta("extractor_version", EXTRACTOR_VERSION)
+            self.progress("upgrading index: extractor changed, re-extracting")
+            force = True
+        changed = files if force else [f for f in files if self._needs_reindex(f)]
         changed_file_ids: set[int] = set()
         for p in changed:
             file_id = self._index_file(p)

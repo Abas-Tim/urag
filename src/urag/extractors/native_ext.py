@@ -999,6 +999,18 @@ class CSharpExtractor(Extractor):
                     chain = source[type_node.start_byte : type_node.end_byte].split(
                         "<", 1
                     )[0]
+            elif cur.type == "assignment_expression":
+                op = cur.child_by_field_name("operator")
+                right = cur.child_by_field_name("right")
+                if (
+                    op is not None
+                    and right is not None
+                    and source[op.start_byte : op.end_byte] in ("+=", "-=")
+                ):
+                    if right.type == "identifier":
+                        chain = source[right.start_byte : right.end_byte]
+                    elif right.type == "member_access_expression":
+                        chain = source[right.start_byte : right.end_byte]
             if chain:
                 from ..models import CallSite
 

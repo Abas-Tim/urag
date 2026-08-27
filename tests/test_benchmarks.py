@@ -441,3 +441,70 @@ def test_summarize_warns_on_empty_system(capsys):
 def test_git_head_format():
     head = run_bench.git_head(Path(__file__).resolve().parents[1])
     assert "@" in head
+
+
+def test_benchmark_declined_root_is_not_run(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    called = []
+
+    monkeypatch.setattr(run_bench, "ROOT", tmp_path)
+    monkeypatch.setattr(run_bench, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(run_bench, "git_head", lambda _root: "test@123")
+    monkeypatch.setattr(
+        run_bench,
+        "bench",
+        lambda root, *_args: called.append(root) or {"systems": {}, "questions": []},
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_bench.py", "--root", str(root), "--no-html"],
+    )
+
+    run_bench.main()
+
+    assert called == [run_bench.FIXTURE]
+
+
+def test_reuse_report_runs_only_recorded_root(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    report = tmp_path / "before.json"
+    report.write_text(
+        json.dumps({"root": str(root), "questions": []}), encoding="utf-8"
+    )
+    called = []
+
+    monkeypatch.setattr(run_bench, "ROOT", tmp_path)
+    monkeypatch.setattr(run_bench, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(run_bench, "git_head", lambda _root: "test@123")
+    monkeypatch.setattr(
+        run_bench,
+        "bench",
+        lambda selected, *_args: (
+            called.append(selected) or {"systems": {}, "questions": []}
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_bench.py",
+            "--reuse-questions",
+            str(report),
+            "--yes",
+            "--no-html",
+        ],
+    )
+
+    run_bench.main()
+
+    assert called == [root.resolve()]
+
+
+def test_validate_reuse_questions_rejects_invalid_entries():
+    assert run_bench.validate_reuse_questions([{"label": "definition"}])
+    assert run_bench.validate_reuse_questions([{"query": "q", "label": None}])
+    assert run_bench.validate_reuse_questions([{"query": "q"}]) is None

@@ -21,6 +21,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SYSTEM_META = {
+    "urag-auto": {
+        "label": "urag adaptive",
+        "kind": "urag",
+        "desc": "Production urag retrieval with automatic query classification and graph routing.",
+    },
     "urag-hybrid": {
         "label": "urag hybrid",
         "kind": "urag",

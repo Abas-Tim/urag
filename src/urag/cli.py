@@ -363,7 +363,9 @@ def eval_cmd(
     ),
     top_k: int = typer.Option(5, "--top-k", help="recall@k cutoff"),
     systems: Optional[str] = typer.Option(
-        None, "--systems", help="comma list: urag-hybrid,urag-lexical,rg,chunk"
+        None,
+        "--systems",
+        help="comma list: urag-auto,urag-hybrid,urag-lexical,rg,chunk",
     ),
     judge_url: Optional[str] = typer.Option(
         None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"
@@ -429,14 +431,14 @@ def eval_cmd(
             qs += autogen_alias_questions(db, cfg.project_root, alias)
         qs = [resolve_question(db, q) for q in qs]
 
-        chosen = (systems or "urag-hybrid,urag-lexical,rg,chunk").split(",")
+        chosen = (systems or "urag-auto,urag-hybrid,urag-lexical,rg,chunk").split(",")
         retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
         rg = RgBaseline(cfg.project_root)
         read = ReadBaseline(cfg.project_root) if "read" in chosen else None
         chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
         oracle = OracleBaseline(cfg.project_root)
 
-        if "urag-hybrid" in chosen or "urag-lexical" in chosen:
+        if any(name in chosen for name in ("urag-auto", "urag-hybrid", "urag-lexical")):
             retriever.search("__warmup__", top_k=top_k)
 
         def urag_run(result) -> SystemRun:
@@ -477,6 +479,11 @@ def eval_cmd(
 
         for i, q in enumerate(qs):
             runs: dict[str, SystemRun] = {}
+            if "urag-auto" in chosen:
+                runs["urag-auto"] = safe_run(
+                    "urag-auto",
+                    lambda: urag_run(retriever.search(q.query, top_k=top_k)),
+                )
             if "urag-hybrid" in chosen:
                 runs["urag-hybrid"] = safe_run(
                     "urag-hybrid",
@@ -523,15 +530,27 @@ def eval_cmd(
                 rows[name][i] = _metrics(run, q, top_k)
 
         agg = {name: aggregate(v) for name, v in rows.items()}
+        labels = sorted({q.label for q in qs})
+        by_label = {
+            name: {
+                label: aggregate(
+                    [row for q, row in zip(qs, system_rows) if q.label == label]
+                )
+                for label in labels
+            }
+            for name, system_rows in rows.items()
+        }
         if json_out or report:
             from . import __version__
 
             payload = {
                 "schema_version": EVAL_SCHEMA_VERSION,
                 "urag_version": __version__,
+                "root": str(cfg.project_root.resolve()),
                 "top_k": top_k,
                 "questions": [q.to_dict() for q in qs],
                 "systems": {name: agg.get(name, {}) for name in chosen},
+                "by_label": by_label,
                 "per_query": rows,
                 "hits": {
                     name: [

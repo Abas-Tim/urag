@@ -421,9 +421,18 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
     qs: list[Question] = []
     # definition questions: pick n units with meaningful signatures
     rows = db.conn.execute(
-        "SELECT id, qualname FROM units WHERE unit_type IN ('function','method','class','struct','interface','enum') AND qualname != '' ORDER BY id",
+        "SELECT MIN(id) AS id, qualname FROM units "
+        "WHERE unit_type IN ('function','method','class','struct','interface','enum') "
+        "AND qualname != '' GROUP BY qualname HAVING COUNT(*) = 1 ORDER BY id",
     ).fetchall()
-    for r in _seeded_shuffle(rows)[:n]:
+    for r in _seeded_shuffle(rows):
+        exact_count = db.conn.execute(
+            "SELECT COUNT(*) FROM units WHERE id != ? AND kind = 'symbol' "
+            "AND unit_type != 'import' AND (name = ? OR qualname = ?)",
+            (r["id"], r["qualname"], r["qualname"]),
+        ).fetchone()[0]
+        if exact_count:
+            continue
         qs.append(
             Question(
                 query=f"where is {r['qualname']} defined",
@@ -432,6 +441,8 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
                 label="definition",
             )
         )
+        if len(qs) >= n:
+            break
     # call questions: pick callees that have callers
     calls = db.conn.execute(
         """
@@ -643,12 +654,15 @@ def load_questions(path: Path) -> list[Question]:
             d = json.loads(line)
             if not isinstance(d, dict):
                 raise ValueError("expected a JSON object")
+            label = d.get("label", "custom")
+            if not isinstance(label, str) or not label:
+                raise ValueError("label must be a non-empty string")
             out.append(
                 Question(
                     query=d["query"],
                     gold_unit_ids=d.get("gold_unit_ids", []),
                     gold_file=d.get("gold_file", ""),
-                    label=d.get("label", "custom"),
+                    label=label,
                     target=d.get("target", ""),
                     depth=d.get("depth", 1),
                     gold_hops={int(k): v for k, v in d.get("gold_hops", {}).items()},
@@ -682,13 +696,16 @@ def reresolve_questions(db: Database, qs: list[Question]) -> list[Question]:
             depth=q.depth,
         )
         if q.label == "definition":
+            rebuilt.gold_file = ""
+            rebuilt.gold_files = []
             name = q.query.removeprefix("where is ").removesuffix(" defined").strip()
             rows = db.conn.execute(
                 "SELECT id FROM units WHERE (qualname = ? OR name = ?) "
-                "AND unit_type NOT IN ('import', 'config_key') ORDER BY start_line LIMIT 1",
+                "AND unit_type NOT IN ('import', 'config_key') ORDER BY start_line",
                 (name, name),
             ).fetchall()
-            rebuilt.gold_unit_ids = [r["id"] for r in rows]
+            if len(rows) == 1:
+                rebuilt.gold_unit_ids = [rows[0]["id"]]
         elif q.label in ("call", "alias") and q.target:
             rebuilt.gold_unit_ids = sorted(
                 {row["unit"].id for row in db.callers(q.target, limit=100000)}

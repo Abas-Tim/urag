@@ -20,6 +20,7 @@ from urag.eval import (
     _unit_tokens,
     judge_results,
     load_questions,
+    reresolve_questions,
     resolve_question,
 )
 from urag.indexer import Indexer
@@ -58,6 +59,30 @@ def test_autogen_and_resolve(db):
         else:
             assert rq.target == "alpha"
             assert rq.query == "what calls alpha"
+
+
+def test_autogen_skips_ambiguous_definitions(db):
+    root = db.db_path.parent.parent
+    (root / "other.py").write_text("def alpha():\n    return 2\n", encoding="utf-8")
+    Indexer(load_config(root), db, NoopEmbedder()).index_all()
+
+    definitions = [
+        q.query for q in autogen_questions(db, 20) if q.label == "definition"
+    ]
+
+    assert "where is alpha defined" not in definitions
+
+
+def test_reresolve_drops_ambiguous_definition(db):
+    root = db.db_path.parent.parent
+    (root / "other.py").write_text("def alpha():\n    return 2\n", encoding="utf-8")
+    Indexer(load_config(root), db, NoopEmbedder()).index_all()
+
+    question = Question(
+        query="where is alpha defined", label="definition", gold_file="m.py"
+    )
+
+    assert reresolve_questions(db, [question]) == []
 
 
 def test_callers_gold(db):
@@ -145,6 +170,14 @@ def test_load_questions_reports_line_number(tmp_path):
     path.write_text('{"query": "valid"}\nnot json\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"questions\.jsonl:2:"):
+        load_questions(path)
+
+
+def test_load_questions_rejects_invalid_label(tmp_path):
+    path = tmp_path / "questions.jsonl"
+    path.write_text('{"query": "q", "label": null}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="label must be a non-empty string"):
         load_questions(path)
 
 

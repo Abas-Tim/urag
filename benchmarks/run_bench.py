@@ -58,6 +58,40 @@ def git_head(cwd: Path) -> str:
     return f"{branch}@{rev}"
 
 
+def validate_reuse_questions(questions: list) -> str | None:
+    for index, question in enumerate(questions, 1):
+        if not isinstance(question, dict):
+            return f"question {index} must be an object"
+        if not isinstance(question.get("query"), str) or not question["query"]:
+            return f"question {index} must have a non-empty query"
+        label = question.get("label", "custom")
+        if not isinstance(label, str) or not label:
+            return f"question {index} must have a non-empty label"
+        if not isinstance(question.get("gold_unit_ids", []), list) or not all(
+            isinstance(value, int) for value in question.get("gold_unit_ids", [])
+        ):
+            return f"question {index} has invalid gold_unit_ids"
+        if not isinstance(question.get("gold_files", []), list) or not all(
+            isinstance(value, str) for value in question.get("gold_files", [])
+        ):
+            return f"question {index} has invalid gold_files"
+        if not all(
+            isinstance(question.get(field, default), expected)
+            for field, default, expected in (
+                ("gold_file", "", str),
+                ("target", "", str),
+                ("depth", 1, int),
+                ("gold_hops", {}, dict),
+            )
+        ):
+            return f"question {index} has invalid fields"
+        try:
+            {int(key): value for key, value in question.get("gold_hops", {}).items()}
+        except (TypeError, ValueError):
+            return f"question {index} has invalid gold_hops"
+    return None
+
+
 def bench(
     root: Path,
     transitive: int,
@@ -208,7 +242,7 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument(
         "--systems",
-        default="urag-hybrid,urag-callers,urag-transitive,rg,read",
+        default="urag-auto,urag-hybrid,urag-lexical,urag-callers,urag-transitive,rg,read",
     )
     ap.add_argument(
         "--reuse-questions",
@@ -233,17 +267,43 @@ def main() -> None:
     rev = git_head(ROOT)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    roots = [FIXTURE] + [Path(r) for r in args.root]
+    selected_roots = [Path(r) for r in args.root]
     if args.self:
-        roots.append(ROOT)
+        selected_roots.append(ROOT)
+    roots = [FIXTURE, *selected_roots]
+    if args.reuse_questions:
+        try:
+            reused = json.loads(args.reuse_questions.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            ap.error(f"invalid reuse report: {exc}")
+        if not isinstance(reused, dict) or not isinstance(
+            reused.get("questions"), list
+        ):
+            ap.error("reuse report must contain a questions list")
+        invalid = validate_reuse_questions(reused["questions"])
+        if invalid:
+            ap.error(f"invalid reuse report: {invalid}")
+        if reused.get("root"):
+            reused_root = Path(reused["root"]).resolve()
+            if selected_roots and all(
+                root.resolve() != reused_root for root in selected_roots
+            ):
+                ap.error("reuse report root does not match --root or --self")
+            roots = [reused_root]
+        else:
+            if len(selected_roots) != 1:
+                ap.error("rootless report reuse requires exactly one --root or --self")
+            roots = selected_roots
+    confirmed_roots: list[Path] = []
     for root in roots:
         if root.resolve() != FIXTURE.resolve() and not args.yes:
             answer = input(f"wipe .urag/ of {root} and rebuild? [y/N] ").strip().lower()
             if answer not in ("y", "yes"):
                 print("skipped")
                 continue
+        confirmed_roots.append(root)
 
-    for root in roots:
+    for root in confirmed_roots:
         out = REPORTS / f"{root.name}-{rev.replace('/', '-')}-{stamp}.json"
         report = bench(
             root,

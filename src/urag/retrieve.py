@@ -211,6 +211,20 @@ class Retriever:
         if top_k is None and rc.default_top_k > 0:
             default_k = min(default_k, rc.default_top_k)
         k = top_k or default_k
+        if mode == "hybrid":
+            target = self._definition_symbol(query)
+            if target:
+                hits = self.db.resolve_units(
+                    target, limit=max(k * 4, 20), language=language
+                )
+                if hits:
+                    results = [
+                        RetrievedUnit(unit, path, score=1.0)
+                        for unit, path, _commit in hits
+                    ]
+                    results = self._limit_results(results, k)
+                    self._enrich(results)
+                    return SearchResult(results, "definitions", query, qc, budget)
         if qc == "impact":
             target = self._impact_symbol(query)
             if target:
@@ -338,6 +352,18 @@ class Retriever:
             r.stale = stale.get(r.file_path, False)
 
     @staticmethod
+    def _definition_symbol(query: str) -> str | None:
+        match = re.fullmatch(
+            r"\s*(?:where\s+is|definition\s+of)\s+(.+?)(?:\s+defined)?\s*[?.]*\s*",
+            query,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        target = match.group(1).strip(" `\"'()[]")
+        return target or None
+
+    @staticmethod
     def _impact_symbol(query: str) -> str | None:
         """Extract the target symbol from an impact query like 'what calls X'."""
         import re
@@ -410,15 +436,46 @@ class Retriever:
             "invoke",
         }
         words = query.split()
+
+        def symbol_at(text: str) -> str:
+            text = text.lstrip("?.,()[]")
+            if not text or not (text[0].isalpha() or text[0] == "_"):
+                return ""
+            out: list[str] = []
+            depth = 0
+            i = 0
+            while i < len(text):
+                if text.startswith("->", i):
+                    out.extend(("-", ">"))
+                    i += 2
+                    continue
+                char = text[i]
+                if char == "<":
+                    depth += 1
+                elif char == ">":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                elif char.isspace() and depth == 0:
+                    break
+                elif not (
+                    char.isalnum()
+                    or char in "_.$:,-"
+                    or (depth > 0 and (char.isspace() or char == "*"))
+                ):
+                    break
+                out.append(char)
+                i += 1
+            return "".join(out).rstrip("?.,")
+
         for i, w in enumerate(words):
             base = w.strip("?.,()[]")
             if base.lower() in keywords:
                 for j in range(i + 1, len(words)):
-                    m = re.match(
-                        r"[A-Za-z_][A-Za-z0-9_.$:]*", words[j].strip("?.,()[]")
-                    )
-                    tok = m.group(0) if m else ""
-                    if tok.lower() not in stop and tok.lower() not in verbs:
+                    tok = symbol_at(" ".join(words[j:]))
+                    if tok.lower() not in stop and (
+                        base.lower() != "breaks" or tok.lower() not in verbs
+                    ):
                         return tok
         for tok in reversed(re.findall(r"[A-Za-z_][A-Za-z0-9_.$:]*", query)):
             if tok.lower() not in stop and tok.lower() not in verbs:

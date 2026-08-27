@@ -32,6 +32,13 @@ class _RankingDb:
     def dense_search(self, *args, **kwargs):
         return self.dense
 
+    def resolve_units(self, name, limit=30, language=None):
+        return [
+            (unit, path, "")
+            for unit, path, _score in self.lexical
+            if unit.name == name or unit.qualname == name
+        ][:limit]
+
 
 def _unit(unit_id: int, kind: str, name: str) -> Unit:
     return Unit(
@@ -62,6 +69,45 @@ def test_hybrid_promotes_exact_symbol_matches_over_dense_noise(tmp_path: Path):
 
     assert result.results[0].unit.name == "parse"
     assert conceptual.results[0].unit.name == "notes"
+
+
+def test_definition_query_returns_only_exact_symbols(tmp_path: Path):
+    (tmp_path / "module.py").write_text(
+        "def parse_token():\n    return True\n\ndef unrelated():\n    return False\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    Indexer(cfg, db, NoopEmbedder()).index_all()
+    try:
+        result = Retriever(cfg, db, NoopEmbedder()).search(
+            "where is parse_token defined", mode="hybrid", top_k=5
+        )
+        assert result.mode == "definitions"
+        assert [item.unit.name for item in result.results] == ["parse_token"]
+    finally:
+        db.close()
+
+
+def test_resolve_units_prioritizes_qualified_exact_match(tmp_path: Path):
+    (tmp_path / "module.py").write_text(
+        "class pkg:\n"
+        "    class Service:\n"
+        "        pass\n\n"
+        "class other:\n"
+        "    class pkg:\n"
+        "        class Service:\n"
+        "            pass\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    Indexer(cfg, db, NoopEmbedder()).index_all()
+    try:
+        results = db.resolve_units("pkg.Service", limit=1, language="python")
+        assert results[0][0].qualname == "pkg.Service"
+    finally:
+        db.close()
 
 
 def test_dense_and_hybrid_search_use_indexed_vectors(tmp_path: Path):

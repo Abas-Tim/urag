@@ -742,7 +742,9 @@ class Database:
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
 
-    def resolve_units(self, name: str, limit: int = 30) -> list[tuple[Unit, str, str]]:
+    def resolve_units(
+        self, name: str, limit: int = 30, language: str | None = None
+    ) -> list[tuple[Unit, str, str]]:
         """Exact symbol definition lookup by name or qualname."""
         name = name.strip()
         if not name:
@@ -753,12 +755,23 @@ class Database:
             FROM units u JOIN files f ON f.id = u.file_id
             WHERE u.kind = 'symbol' AND u.unit_type != 'import'
               AND (u.name = ? OR u.qualname = ? OR u.qualname LIKE ? ESCAPE '\\')
-            ORDER BY (u.unit_type = 'class' OR u.unit_type = 'struct'
+              AND (? = '' OR f.language = ?)
+            ORDER BY (u.qualname = ?) DESC, (u.name = ?) DESC,
+                     (u.unit_type = 'class' OR u.unit_type = 'struct'
                       OR u.unit_type = 'interface' OR u.unit_type = 'enum') DESC,
                      u.name
             LIMIT ?
             """,
-            (name, name, "%." + name.replace("_", r"\_"), limit),
+            (
+                name,
+                name,
+                "%." + name.replace("_", r"\_"),
+                language or "",
+                language or "",
+                name,
+                name,
+                limit,
+            ),
         ).fetchall()
         return [(self._row_to_unit(r), r["path"], r["commit"]) for r in rows]
 

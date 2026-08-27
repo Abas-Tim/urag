@@ -536,7 +536,11 @@ def eval_cmd(
                 runs["chunk"] = safe_run(
                     "chunk", lambda: chunk.search(q.query, top_k, db)
                 )
-            if q.target and ("urag-callers" in chosen or "urag-transitive" in chosen):
+            if (
+                q.target
+                and q.label != "reference"
+                and ("urag-callers" in chosen or "urag-transitive" in chosen)
+            ):
                 if "urag-callers" in chosen:
                     runs["urag-callers"] = safe_run(
                         "urag-callers",
@@ -553,7 +557,7 @@ def eval_cmd(
                             )
                         ),
                     )
-            if q.target and "urag-references" in chosen:
+            if q.label == "reference" and "urag-references" in chosen:
                 runs["urag-references"] = safe_run(
                     "urag-references",
                     lambda: urag_run(

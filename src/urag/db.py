@@ -13,7 +13,7 @@ from pathlib import Path
 
 import sqlite_vec
 
-from .models import IndexStats, SourceFile, Unit, RetrievedUnit
+from .models import IndexStats, SourceFile, Unit
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS units (
 CREATE INDEX IF NOT EXISTS idx_units_file ON units(file_id);
 CREATE INDEX IF NOT EXISTS idx_units_name ON units(name);
 CREATE INDEX IF NOT EXISTS idx_units_qualname ON units(qualname);
+CREATE INDEX IF NOT EXISTS idx_units_unit_type ON units(unit_type);
 CREATE TABLE IF NOT EXISTS call_edges (
   caller_unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS call_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
 CREATE INDEX IF NOT EXISTS idx_call_edges_caller ON call_edges(caller_unit_id);
+CREATE INDEX IF NOT EXISTS idx_call_edges_callee_full ON call_edges(callee_full);
 CREATE TABLE IF NOT EXISTS ref_edges (
   unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -72,12 +74,15 @@ CREATE TABLE IF NOT EXISTS ref_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_ref_edges_ref ON ref_edges(ref);
 CREATE INDEX IF NOT EXISTS idx_ref_edges_unit ON ref_edges(unit_id);
+CREATE INDEX IF NOT EXISTS idx_ref_edges_ref_full ON ref_edges(ref_full);
 CREATE TABLE IF NOT EXISTS import_aliases (
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
   alias TEXT NOT NULL,
   target TEXT NOT NULL,
   PRIMARY KEY (file_id, alias)
 );
+CREATE INDEX IF NOT EXISTS idx_import_aliases_target ON import_aliases(target);
+CREATE INDEX IF NOT EXISTS idx_files_language ON files(language);
 """
 
 FTS_TRIGGERS = """
@@ -103,9 +108,10 @@ END;
 
 
 class Database:
-    def __init__(self, db_path: Path, dimension: int = 384):
+    def __init__(self, db_path: Path, dimension: int = 384, migrate: bool = False):
         self.db_path = Path(db_path)
         self.dimension = dimension
+        self.migrate = migrate
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: the watch daemon re-indexes from a
         # debounce thread. The connection is still only ever used by one
@@ -182,8 +188,16 @@ class Database:
         if vector_schema:
             match = re.search(r"FLOAT\[(\d+)\]", vector_schema[0] or "", re.IGNORECASE)
             if match and int(match.group(1)) != self.dimension:
+                if not self.migrate:
+                    raise RuntimeError(
+                        f"embedding dimension mismatch: the index stores "
+                        f"{match.group(1)}-dimensional vectors but embedding.dimension "
+                        f"is {self.dimension}. Restore the original dimension or run "
+                        f"`urag embed --dimension {self.dimension} --reindex` to "
+                        f"rebuild embeddings."
+                    )
                 c.execute("DROP TABLE vec_units")
-        c.executescript(f"""
+        c.executescript("""
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_units USING fts5(
               name, qualname, signature, summary, concepts, relationships, unit_type, file_path,
               content='units', content_rowid='id',
@@ -203,25 +217,28 @@ class Database:
               embedding FLOAT[{self.dimension}]
             );
         """)
-        c.execute("DELETE FROM vec_units WHERE unit_id NOT IN (SELECT id FROM units)")
-        c.execute(
-            """
-            UPDATE call_edges SET callee_unit_id = NULL
-            WHERE callee_unit_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM units WHERE units.id = call_edges.callee_unit_id
-              )
-            """
-        )
-        c.execute(
-            """
-            UPDATE ref_edges SET ref_unit_id = NULL
-            WHERE ref_unit_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM units WHERE units.id = ref_edges.ref_unit_id
-              )
-            """
-        )
+        if self.migrate:
+            c.execute(
+                "DELETE FROM vec_units WHERE unit_id NOT IN (SELECT id FROM units)"
+            )
+            c.execute(
+                """
+                UPDATE call_edges SET callee_unit_id = NULL
+                WHERE callee_unit_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM units WHERE units.id = call_edges.callee_unit_id
+                  )
+                """
+            )
+            c.execute(
+                """
+                UPDATE ref_edges SET ref_unit_id = NULL
+                WHERE ref_unit_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM units WHERE units.id = ref_edges.ref_unit_id
+                  )
+                """
+            )
         if rebuild_fts:
             c.execute("INSERT INTO fts_units(fts_units) VALUES ('rebuild')")
         if not self.get_meta("ref_edges_v1"):
@@ -248,10 +265,6 @@ class Database:
         self.conn.commit()
 
     # ---------- files ----------
-
-    def all_files(self) -> dict[str, SourceFile]:
-        rows = self.conn.execute("SELECT * FROM files").fetchall()
-        return {r["path"]: SourceFile(**dict(r)) for r in rows}
 
     def known_paths(self) -> set[str]:
         return {r[0] for r in self.conn.execute("SELECT path FROM files")}
@@ -417,12 +430,6 @@ class Database:
         if commit:
             self.conn.commit()
 
-    def units_for_file(self, file_id: int) -> list[Unit]:
-        rows = self.conn.execute(
-            "SELECT * FROM units WHERE file_id = ?", (file_id,)
-        ).fetchall()
-        return [self._row_to_unit(r) for r in rows]
-
     def unit_by_id(self, unit_id: int) -> tuple[Unit, str, str] | None:
         """(unit, path, commit) for a unit id."""
         row = self.conn.execute(
@@ -489,8 +496,6 @@ class Database:
         Bare `:` would be parsed as a column filter (`Runner::run` -> column
         "Runner"), and AND/OR/NOT are operator keywords. Quote every term.
         """
-        import re
-
         terms = [t for t in re.findall(r"[\w.$:#/+-]+", query, flags=re.UNICODE) if t]
         if not terms:
             return ""
@@ -528,13 +533,6 @@ class Database:
                 out.append((u, path, r["distance"]))
         return out
 
-    def unit_embedding(self, unit_id: int) -> list[float] | None:
-        row = self.conn.execute(
-            "SELECT vec_f32(embedding) AS v FROM vec_units WHERE unit_id = ?",
-            (unit_id,),
-        ).fetchone()
-        return list(row["v"]) if row else None
-
     def store_embeddings(
         self, units: list[tuple[int, str, str, list[float]]], commit: bool = True
     ) -> None:
@@ -545,10 +543,6 @@ class Database:
         )
         if commit:
             self.conn.commit()
-
-    def delete_embedding(self, unit_id: int) -> None:
-        self.conn.execute("DELETE FROM vec_units WHERE unit_id = ?", (unit_id,))
-        self.conn.commit()
 
     def clear_embeddings(self) -> None:
         self.conn.execute("DELETE FROM vec_units")
@@ -612,8 +606,6 @@ class Database:
         name = name.strip()
         if not name:
             return []
-        import re
-
         esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
         exact_ids = [
             row["id"]
@@ -723,8 +715,6 @@ class Database:
         name = name.strip()
         if not name:
             return []
-        import re
-
         esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
         exact_ids = [
             row["id"]
@@ -900,7 +890,8 @@ class Database:
         with p.open("r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         lines = text.splitlines()
-        span = lines[u.start_line - 1 : u.end_line]
+        first = max(u.start_line, 1)
+        span = lines[first - 1 : u.end_line]
         return {
             "unit_id": u.id,
             "file": path,
@@ -986,7 +977,7 @@ class Database:
             (
                 name,
                 name,
-                "%." + name.replace("_", r"\_"),
+                "%." + name.replace("%", r"\%").replace("_", r"\_"),
                 language or "",
                 language or "",
                 name,
@@ -1020,6 +1011,7 @@ class Database:
         target = target.strip()
         if not target:
             return []
+        esc = target.replace("%", r"\%").replace("_", r"\_")
         out: dict[str, dict] = {}
         rows = self.conn.execute(
             """
@@ -1029,7 +1021,7 @@ class Database:
             ORDER BY f.path
             LIMIT ?
             """,
-            (target, target + ".%", limit),
+            (target, esc + ".%", limit),
         ).fetchall()
         for r in rows:
             out.setdefault(r["path"], dict(r))
@@ -1041,7 +1033,7 @@ class Database:
             ORDER BY f.path
             LIMIT ?
             """,
-            (target, target + ".%", limit),
+            (target, esc + ".%", limit),
         ).fetchall()
         for r in urows:
             key = r["path"]

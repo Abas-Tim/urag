@@ -1,12 +1,11 @@
 """Tests for native-language extractors (go, rust, java, c, cpp)."""
 
 from urag.extractors.native_ext import (
-    GoExtractor,
-    RustExtractor,
-    JavaExtractor,
     CExtractor,
+    GoExtractor,
+    JavaExtractor,
+    RustExtractor,
 )
-
 
 GO_SRC = """package auth
 

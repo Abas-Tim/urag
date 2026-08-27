@@ -3,7 +3,7 @@ name = "urag-cli"
 version = "0.1.5"
 description = "Universal Repository Agent Graph: structure-aware, token-efficient RAG for projects"
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 authors = [{ name = "urag contributors" }]
 keywords = ["rag", "code-search", "mcp", "embedding", "tree-sitter", "agent", "indexing"]
@@ -75,4 +75,28 @@ only-include = [
 default-groups = ["dev"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.12"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "UP", "B", "SIM", "RUF", "I", "S", "BLE", "TRY"]
+ignore = [
+    "S101",
+    "PLR0913",
+    "PLR0912",
+    "TRY003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/urag/cli.py" = ["B008", "UP045", "S110", "BLE001"]
+"src/urag/eval.py" = ["S110", "BLE001", "S603", "S607", "S608", "S311", "TRY301"]
+"src/urag/watcher.py" = ["BLE001"]
+"src/urag/embed.py" = ["BLE001"]
+"src/urag/mcp_server.py" = ["BLE001"]
+"src/urag/db.py" = ["S608"]
+"src/urag/git_aware.py" = ["S603", "S607"]
+"src/urag/extractors/xml_ext.py" = ["S314"]
+"tests/**" = ["B008", "RUF059", "RUF100", "PLR0402", "S101", "S104", "S311", "S603", "S607", "S608", "B905", "B904", "TRY003"]

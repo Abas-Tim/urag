@@ -1,15 +1,14 @@
 """Tests for call-graph extraction and impact routing."""
 
-from urag.extractors.python_ext import PythonExtractor
-from urag.extractors.ts_ext import TsExtractor
+from urag.classify import classify
 from urag.extractors.native_ext import (
+    CExtractor,
+    CSharpExtractor,
     GoExtractor,
     JavaExtractor,
-    CSharpExtractor,
-    CExtractor,
 )
+from urag.extractors.python_ext import PythonExtractor
 from urag.retrieve import Retriever
-from urag.classify import classify
 
 
 def test_python_calls():

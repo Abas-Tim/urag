@@ -17,20 +17,23 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import random
 import re
-import statistics
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
-from .config import Config, language_for_path
+from rich.console import Console
+from rich.table import Table
+
+from .config import Config
 from .db import Database
 from .embed import Embedder
 from .indexer import Indexer
 from .models import Unit
-from .retrieve import Retriever
-
 
 EVAL_SCHEMA_VERSION = 2
 
@@ -47,16 +50,13 @@ class Question:
     gold_files: list[str] | None = None
 
     def __post_init__(self) -> None:
-        self.gold_files = self.gold_files or (
-            [self.gold_file] if self.gold_file else []
-        )
+        self.gold_files = self.gold_files or ([self.gold_file] if self.gold_file else [])
 
     def to_dict(self) -> dict:
         return {
             "query": self.query,
             "label": self.label,
-            "gold_file": self.gold_file
-            or (self.gold_files[0] if self.gold_files else ""),
+            "gold_file": self.gold_file or (self.gold_files[0] if self.gold_files else ""),
             "gold_files": self.gold_files,
             "gold_unit_ids": self.gold_unit_ids,
             "target": self.target,
@@ -81,8 +81,7 @@ class Hit:
             "unit_ids": self.unit_ids,
             "tokens": self.tokens,
             "title": self.title[:detail_cap],
-            "detail": self.detail[:detail_cap]
-            + ("…" if len(self.detail) > detail_cap else ""),
+            "detail": self.detail[:detail_cap] + ("…" if len(self.detail) > detail_cap else ""),
         }
 
 
@@ -111,7 +110,7 @@ class RgBaseline:
     """opencode `grep` emulation: rank files by matching-line counts and show
     the matching lines, like the agent's grep tool output."""
 
-    STOPWORDS = {
+    STOPWORDS: ClassVar[set[str]] = {
         "who",
         "what",
         "where",
@@ -159,8 +158,6 @@ class RgBaseline:
         return normalized
 
     def search(self, query: str, top_k: int, db: Database) -> SystemRun:
-        import re
-
         raw = re.split(r"[^A-Za-z0-9_.]+", query)
         terms: list[str] = []
         seen: set[str] = set()
@@ -168,9 +165,7 @@ class RgBaseline:
             if len(t) <= 1 or t.lower() in self.STOPWORDS:
                 continue
             candidates = [
-                p
-                for p in re.split(r"[._]", t)
-                if len(p) > 1 and p.lower() not in self.STOPWORDS
+                p for p in re.split(r"[._]", t) if len(p) > 1 and p.lower() not in self.STOPWORDS
             ] + [t]
             for cand in candidates:
                 if cand not in seen:
@@ -192,6 +187,7 @@ class RgBaseline:
                     capture_output=True,
                     text=True,
                     timeout=20,
+                    check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):
                 continue
@@ -222,9 +218,7 @@ class RgBaseline:
                 hits.append(Hit(path, None, matched_tokens, detail=detail))
             if len(hits) >= top_k * 5:
                 break
-        return SystemRun(
-            "rg", hits, time.perf_counter() - t0, sum(h.tokens for h in hits)
-        )
+        return SystemRun("rg", hits, time.perf_counter() - t0, sum(h.tokens for h in hits))
 
 
 class ReadBaseline:
@@ -285,19 +279,17 @@ class ChunkBaseline:
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
-        chunks: list[
-            tuple[str, str, int, int]
-        ] = []  # (file, text, byte_start, byte_end)
+        chunks: list[tuple[str, str, int, int]] = []  # (file, text, byte_start, byte_end)
         for p in Indexer(cfg, db, embedder).discover():
             rel = p.relative_to(cfg.project_root).as_posix()
             try:
-                text = p.read_text(encoding="utf-8", errors="replace")
+                data = p.read_bytes()
             except OSError:
                 continue
-            size = len(text)
-            for start in range(0, size, self.CHUNK_CHARS):
-                seg = text[start : start + self.CHUNK_CHARS]
-                chunks.append((rel, seg, start, start + len(seg)))
+            for start in range(0, len(data), self.CHUNK_CHARS):
+                seg_bytes = data[start : start + self.CHUNK_CHARS]
+                seg = seg_bytes.decode("utf-8", errors="replace")
+                chunks.append((rel, seg, start, start + len(seg_bytes)))
         self.chunks = chunks
         t0 = time.perf_counter()
         self.vectors = embedder.embed_passages([c[1] for c in chunks])
@@ -307,17 +299,15 @@ class ChunkBaseline:
         t0 = time.perf_counter()
         q = self.embedder.embed_query(query)
         scored = [
-            (i, sum(a * b for a, b in zip(q, v))) for i, v in enumerate(self.vectors)
+            (i, sum(a * b for a, b in zip(q, v, strict=False))) for i, v in enumerate(self.vectors)
         ]
         scored.sort(key=lambda kv: kv[1], reverse=True)
         hits: list[Hit] = []
         for i, _s in scored[:top_k]:
-            file, text, bs, be = self.chunks[i]
+            file, text, bs, _be = self.chunks[i]
             unit_id = self._unit_at(db, file, bs)
             hits.append(Hit(file, unit_id, _tokens(text)))
-        return SystemRun(
-            "chunk-rag", hits, time.perf_counter() - t0, sum(h.tokens for h in hits)
-        )
+        return SystemRun("chunk-rag", hits, time.perf_counter() - t0, sum(h.tokens for h in hits))
 
     @staticmethod
     def _unit_at(db: Database, file: str, byte_start: int) -> int | None:
@@ -409,8 +399,6 @@ def resolve_question(db: Database, q: Question) -> Question:
 
 
 def _seeded_shuffle(items: list, seed: int = 42) -> list:
-    import random
-
     items = list(items)
     random.Random(seed).shuffle(items)
     return items
@@ -468,42 +456,20 @@ def autogen_questions(db: Database, n: int) -> list[Question]:
 # ---------------------------------------------------------------------------
 
 
-def transitive_caller_ids(
-    db: Database, name: str, max_depth: int = 3
-) -> dict[int, int]:
-    """BFS over call_edges: unit_id -> shortest hop (1 = direct caller).
+def transitive_caller_ids(db: Database, name: str, max_depth: int = 3) -> dict[int, int]:
+    """unit_id -> shortest hop (1 = direct caller).
 
     Uses the same caller-resolution path as production retrieval
     (``Database.callers``), so the gold matches what the system under test
     can actually find — including alias-resolved and fully-qualified names.
     """
-    seen: dict[int, int] = {}
-    frontier: list[str] = [name]
-    for hop in range(1, max_depth + 1):
-        nxt: list[str] = []
-        for callee in frontier:
-            for row in db.callers(callee, limit=10000):
-                uid = row["unit"].id
-                if uid in seen:
-                    continue
-                seen[uid] = hop
-                u = row["unit"]
-                nxt.append(u.name)
-                if u.qualname and u.qualname != u.name:
-                    nxt.append(u.qualname)
-        frontier = list(dict.fromkeys(nxt))
-        if not frontier:
-            break
-    return seen
+    rows = db.transitive_callers(name, max_depth=max_depth, limit=100000)
+    return {row["unit"].id: row["hop"] for row in rows}
 
 
-def autogen_transitive_questions(
-    db: Database, n: int, max_depth: int = 3
-) -> list[Question]:
+def autogen_transitive_questions(db: Database, n: int, max_depth: int = 3) -> list[Question]:
     """Questions whose gold = ALL transitive callers (hops 1..max_depth)."""
-    rows = db.conn.execute(
-        "SELECT DISTINCT callee FROM call_edges ORDER BY callee"
-    ).fetchall()
+    rows = db.conn.execute("SELECT DISTINCT callee FROM call_edges ORDER BY callee").fetchall()
     qs: list[Question] = []
     for r in _seeded_shuffle(rows):
         callee = r["callee"]
@@ -577,9 +543,7 @@ def scan_import_aliases(source: str, language: str) -> dict[str, str]:
                 continue
             m = re.match(r"^import\s+(\w+)\s+from\s+['\"]([^'\"]+)['\"]", s)
             if m:
-                aliases[m.group(1)] = (
-                    f"{m.group(2).strip('@').replace('/', '.')}.default"
-                )
+                aliases[m.group(1)] = f"{m.group(2).strip('@').replace('/', '.')}.default"
                 continue
             m = re.match(r"^import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]", s)
             if m:
@@ -671,16 +635,14 @@ def autogen_alias_questions(db: Database, root: Path, n: int) -> list[Question]:
 
 def load_questions(path: Path) -> list[Question]:
     out: list[Question] = []
-    for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), 1
-    ):
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         try:
             d = json.loads(line)
             if not isinstance(d, dict):
-                raise ValueError("expected a JSON object")
+                raise TypeError("expected a JSON object")
             label = d.get("label", "custom")
             if not isinstance(label, str) or not label:
                 raise ValueError("label must be a non-empty string")
@@ -741,6 +703,13 @@ def reresolve_questions(db: Database, qs: list[Question]) -> list[Question]:
             hops = transitive_caller_ids(db, q.target, max_depth=q.depth or 3)
             rebuilt.gold_unit_ids = list(hops)
             rebuilt.gold_hops = hops
+        elif q.label == "reference" and q.target:
+            row = db.conn.execute(
+                "SELECT GROUP_CONCAT(DISTINCT e.unit_id) AS refs FROM ref_edges e WHERE e.ref = ?",
+                (q.target,),
+            ).fetchone()
+            if row and row["refs"]:
+                rebuilt.gold_unit_ids = [int(x) for x in row["refs"].split(",")]
         else:
             rebuilt.gold_unit_ids = list(q.gold_unit_ids)
             rebuilt.gold_files = list(q.gold_files or [])
@@ -820,7 +789,7 @@ def aggregate(rows: list[dict | None]) -> dict:
         "mean_tokens": sum(r["tokens"] for r in present) / n,
         "mean_sec": sum(lat) / n,
         "p50_sec": lat[(n - 1) // 2] if n else 0.0,
-        "p95_sec": lat[int(math.ceil(0.95 * n)) - 1] if n else 0.0,
+        "p95_sec": lat[math.ceil(0.95 * n) - 1] if n else 0.0,
     }
 
 
@@ -837,9 +806,7 @@ def _llm_chat(url: str, model: str, key: str, messages: list[dict]) -> str:
         headers["Authorization"] = f"Bearer {key}"
     payload = {"model": model, "messages": messages, "temperature": 0.2}
     with httpx.Client(timeout=60) as client:
-        resp = client.post(
-            url.rstrip("/") + "/chat/completions", json=payload, headers=headers
-        )
+        resp = client.post(url.rstrip("/") + "/chat/completions", json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
@@ -855,8 +822,6 @@ def judge_results(
     progress=None,
 ) -> dict[str, float]:
     """Answer each question per system with the LLM, then grade the answer."""
-    from .extractors import get_extractor
-
     log = progress or (lambda m: None)
     scores: dict[str, list[float]] = {}
     for i, q in enumerate(questions):
@@ -925,3 +890,229 @@ def _system_context(run: SystemRun, q: Question, db: Database, cfg: Config) -> s
         else:
             parts.append(f"- {h.file}")
     return "\n".join(parts) if parts else "(no context retrieved)"
+
+
+# ---------------------------------------------------------------------------
+# Eval orchestration (invoked by the CLI)
+# ---------------------------------------------------------------------------
+
+
+def run_eval(
+    cfg: Config,
+    db: Database,
+    embedder: Embedder,
+    *,
+    questions: Path | None = None,
+    autogen: int | None = None,
+    transitive: int | None = None,
+    alias: int | None = None,
+    reference: int | None = None,
+    top_k: int = 5,
+    systems: str | None = None,
+    judge_url: str | None = None,
+    judge_model: str | None = None,
+    judge_key: str | None = None,
+    json_out: bool = False,
+    report: Path | None = None,
+    reresolve: bool = False,
+    console: Console | None = None,
+) -> None:
+    from . import __version__
+    from .git_aware import Git
+    from .retrieve import Retriever
+
+    console = console or Console()
+
+    if questions:
+        qs = load_questions(questions)
+        if reresolve:
+            before = len(qs)
+            qs = reresolve_questions(db, qs)
+            console.print(
+                f"[dim]reresolved {len(qs)}/{before} questions against the current index[/dim]"
+            )
+    elif autogen:
+        qs = autogen_questions(db, autogen)
+    else:
+        qs = autogen_questions(db, 10)
+    if transitive:
+        qs += autogen_transitive_questions(db, transitive)
+    if alias:
+        qs += autogen_alias_questions(db, cfg.project_root, alias)
+    if reference:
+        qs += autogen_reference_questions(db, reference)
+    qs = [resolve_question(db, q) for q in qs]
+
+    chosen = (systems or "urag-auto,urag-hybrid,urag-lexical,rg,chunk").split(",")
+    retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
+    rg = RgBaseline(cfg.project_root)
+    read = ReadBaseline(cfg.project_root) if "read" in chosen else None
+    chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
+    oracle = OracleBaseline(cfg.project_root)
+
+    if any(name in chosen for name in ("urag-auto", "urag-hybrid", "urag-lexical")):
+        retriever.search("__warmup__", top_k=top_k)
+
+    def urag_run(result) -> SystemRun:
+        hits = []
+        total = 0
+        for x in result.results:
+            ev = db.load_evidence(x.unit.id)
+            span = (ev or {}).get("span", "")
+            toks = _tokens(span) if span else _unit_tokens(x.unit)
+            hits.append(
+                Hit(
+                    x.file_path,
+                    x.unit.id,
+                    toks,
+                    detail=span,
+                    title=(x.unit.signature or x.unit.name),
+                )
+            )
+            total += toks
+        return SystemRun(result.mode, hits, 0.0, total)
+
+    rows: dict[str, list] = {s: [None] * len(qs) for s in chosen}
+    runs_by_system: dict[str, dict[int, SystemRun]] = {}
+    console.print(
+        f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]"
+    )
+
+    def safe_run(name: str, fn) -> SystemRun:
+        t = time.perf_counter()
+        try:
+            run = fn()
+        except Exception as exc:  # one failing system must not kill the eval
+            console.print(f"[yellow]{name}: query failed: {exc}[/yellow]")
+            return SystemRun(name, [], 0.0, 0)
+        if run.seconds == 0.0:
+            run.seconds = time.perf_counter() - t
+        return run
+
+    for i, q in enumerate(qs):
+        runs: dict[str, SystemRun] = {}
+        if "urag-auto" in chosen:
+            runs["urag-auto"] = safe_run(
+                "urag-auto",
+                lambda q=q: urag_run(retriever.search(q.query, top_k=top_k)),
+            )
+        if "urag-hybrid" in chosen:
+            runs["urag-hybrid"] = safe_run(
+                "urag-hybrid",
+                lambda q=q: urag_run(retriever.search(q.query, top_k=top_k, query_class="local")),
+            )
+        if "urag-lexical" in chosen:
+            runs["urag-lexical"] = safe_run(
+                "urag-lexical",
+                lambda q=q: urag_run(retriever.search(q.query, top_k=top_k, mode="lexical")),
+            )
+        if "rg" in chosen:
+            runs["rg"] = safe_run("rg", lambda q=q: rg.search(q.query, top_k, db))
+        if read is not None:
+            runs["read"] = safe_run("read", lambda q=q: read.search(q.query, top_k, db))
+        if chunk is not None:
+            runs["chunk"] = safe_run("chunk", lambda q=q: chunk.search(q.query, top_k, db))
+        if (
+            q.target
+            and q.label != "reference"
+            and ("urag-callers" in chosen or "urag-transitive" in chosen)
+        ):
+            if "urag-callers" in chosen:
+                runs["urag-callers"] = safe_run(
+                    "urag-callers",
+                    lambda q=q: urag_run(retriever.search_callers(q.target, limit=top_k)),
+                )
+            if "urag-transitive" in chosen:
+                runs["urag-transitive"] = safe_run(
+                    "urag-transitive",
+                    lambda q=q: urag_run(
+                        retriever.search_transitive(q.target, depth=q.depth or 3, limit=top_k)
+                    ),
+                )
+        if q.label == "reference" and "urag-references" in chosen:
+            runs["urag-references"] = safe_run(
+                "urag-references",
+                lambda q=q: urag_run(retriever.search_references(q.target, limit=top_k)),
+            )
+        if "oracle" in chosen:
+            runs["oracle"] = safe_run("oracle", lambda q=q: oracle.search(q, db))
+        for name, run in runs.items():
+            runs_by_system.setdefault(name, {})[i] = run
+            rows[name][i] = _metrics(run, q, top_k)
+
+    agg = {name: aggregate(v) for name, v in rows.items()}
+    labels = sorted({q.label for q in qs})
+    by_label = {
+        name: {
+            label: aggregate(
+                [row for q, row in zip(qs, system_rows, strict=True) if q.label == label]
+            )
+            for label in labels
+        }
+        for name, system_rows in rows.items()
+    }
+    if json_out or report:
+        payload = {
+            "schema_version": EVAL_SCHEMA_VERSION,
+            "urag_version": __version__,
+            "root": str(cfg.project_root.resolve()),
+            "top_k": top_k,
+            "questions": [q.to_dict() for q in qs],
+            "systems": {name: agg.get(name, {}) for name in chosen},
+            "by_label": by_label,
+            "per_query": rows,
+            "hits": {
+                name: [
+                    [
+                        h.to_dict()
+                        for h in (
+                            runs_by_system.get(name, {}).get(i) or SystemRun(name, [], 0.0, 0)
+                        ).hits
+                    ]
+                    for i in range(len(qs))
+                ]
+                for name in chosen
+            },
+        }
+        if chunk is not None:
+            payload["chunk_load_seconds"] = chunk.load_seconds
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        if json_out:
+            print(text)
+        if report:
+            report.write_text(text, encoding="utf-8")
+    if not json_out:
+        t = Table(title=f"urag eval — {cfg.project_root} ({len(qs)} questions, top_k={top_k})")
+        t.add_column("system")
+        t.add_column("recall@k")
+        t.add_column("mrr")
+        t.add_column("tokens/run")
+        t.add_column("p50(s)")
+        t.add_column("p95(s)")
+        for name in chosen:
+            a = agg.get(name, {})
+            t.add_row(
+                name,
+                f"{a.get('unit_recall', 0):.2f}",
+                f"{a.get('mrr', 0):.2f}",
+                f"{a.get('mean_tokens', 0):.0f}",
+                f"{a.get('p50_sec', 0) * 1000:.0f}ms",
+                f"{a.get('p95_sec', 0) * 1000:.0f}ms",
+            )
+        console.print(t)
+
+    if judge_url:
+        console.print("[dim]running LLM judge tier...[/dim]")
+        scores = judge_results(
+            qs,
+            runs_by_system,
+            db,
+            cfg,
+            judge_url,
+            judge_model or "gpt-4o-mini",
+            judge_key or os.environ.get("URAG_JUDGE_KEY", ""),
+            progress=lambda m: console.print(m),
+        )
+        console.print("[bold]answer quality (correct 0-10):[/bold]")
+        for name in chosen:
+            console.print(f"  {name}: {scores.get(name, float('nan')):.2f}")

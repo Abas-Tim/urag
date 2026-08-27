@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import httpx
 
@@ -48,7 +48,7 @@ class LocalEmbedder(Embedder):
             raise RuntimeError(
                 f"model {cfg.model!r} produces {real_dim}-dimensional vectors, "
                 f"but embedding.dimension is {cfg.dimension}. "
-                f"Run: urag embed --model {cfg.model}"
+                f"Run: urag embed --dimension {real_dim}"
             )
         self._dim = real_dim or cfg.dimension
         self.model = TextEmbedding(

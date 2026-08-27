@@ -14,7 +14,7 @@ import re
 import xml.etree.ElementTree as ET
 from bisect import bisect_right
 
-from ..models import Reference, Unit, UNIT_KIND_SYMBOL
+from ..models import UNIT_KIND_SYMBOL, Reference, Unit
 from .base import Extractor, collapse_ws, dedupe_refs
 
 MAX_CHUNK_LINES = 200
@@ -58,10 +58,6 @@ _EVENT_ATTRS = {
 _XSTATIC_RE = re.compile(r"\{x:Static\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+)\}")
 _XTYPE_RE = re.compile(r"\{x:Type\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\}")
 _RESOURCE_RE = re.compile(r"\{(?:StaticResource|DynamicResource)\s+([A-Za-z_][\w.]*)\}")
-
-_TYPED_ATTRS = ("x:datatype",)
-
-_XAML_NS = "{http://schemas.microsoft.com/winfx/2006/xaml}"
 
 
 def _attr(attrs: dict, name: str) -> str | None:
@@ -155,7 +151,7 @@ class XmlExtractor(Extractor):
                 0,
                 len(lines),
                 f"file:{rel_path}",
-                rel_path.split("/")[-1],
+                rel_path.rsplit("/", maxsplit=1)[-1],
                 "file",
                 collapse_ws("".join(lines), 300),
             )
@@ -316,7 +312,7 @@ class XmlExtractor(Extractor):
         if idx < 0:
             return
         line = self._line_of(offsets, idx)
-        qualname = name.split(".")[-1]
+        qualname = name.rsplit(".", maxsplit=1)[-1]
         units.append(
             self._make(
                 lines,
@@ -370,7 +366,7 @@ class XmlExtractor(Extractor):
                     i,
                     end,
                     f"file:{rel_path}#{i}",
-                    rel_path.split("/")[-1],
+                    rel_path.rsplit("/", maxsplit=1)[-1],
                     "file",
                     collapse_ws("".join(lines[i:end]), 300),
                 )

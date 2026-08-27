@@ -2,31 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Iterator
-
-from tree_sitter import Language, Node, Parser
 import tree_sitter_python as tsp
+from tree_sitter import Language, Node, Parser
 
-from ..models import Unit, UNIT_KIND_SYMBOL
+from ..models import UNIT_KIND_SYMBOL, Unit
 from .base import (
+    MAX_SUMMARY_CHARS,
     ByteIndexedSource,
     Extractor,
-    MAX_SUMMARY_CHARS,
     collapse_ws,
     dedupe_refs,
     valid_aliases,
     walk_calls,
 )
 
-_LANG = Language(tsp.language())
+_LANG: Language | None = None
 _PARSER: Parser | None = None
 
 
 def _parser() -> Parser:
-    global _PARSER
+    global _LANG, _PARSER
     if _PARSER is None:
-        _PARSER = Parser()
-        _PARSER.language = _LANG
+        _LANG = Language(tsp.language())
+        _PARSER = Parser(_LANG)
     return _PARSER
 
 
@@ -49,7 +47,7 @@ def _docstring(n: Node, source: str) -> str:
         import ast
 
         val = ast.literal_eval(text)
-    except Exception:
+    except (ValueError, SyntaxError, TypeError):
         val = text.strip("'\"")
     if isinstance(val, str):
         return " ".join(val.split())[:MAX_SUMMARY_CHARS]
@@ -76,9 +74,7 @@ class PythonExtractor(Extractor):
         source = ByteIndexedSource(source)
         tree = _parser().parse(source.encode("utf-8"))
         units: list[Unit] = []
-        self._walk(
-            tree.root_node, source, rel_path, prefix="", parent=None, units=units
-        )
+        self._walk(tree.root_node, source, rel_path, prefix="", parent=None, units=units)
         return units
 
     def collect_calls(self, source: str) -> list:
@@ -271,9 +267,7 @@ class PythonExtractor(Extractor):
                     if body is not None:
                         self._walk(body, source, rel_path, unit.qualname, None, units)
                 elif inner.type == "class_definition":
-                    self._class(
-                        inner, source, rel_path, prefix, parent, units, decorated=child
-                    )
+                    self._class(inner, source, rel_path, prefix, parent, units, decorated=child)
             elif child.type in ("import_statement", "import_from_statement"):
                 units.append(self._imports(child, source, rel_path, prefix))
             else:
@@ -289,12 +283,7 @@ class PythonExtractor(Extractor):
         decorated: Node | None = None,
     ) -> Unit:
         name_node = n.child_by_field_name("name")
-        name = (
-            source[name_node.start_byte : name_node.end_byte]
-            if name_node
-            else "anonymous"
-        )
-        params = n.child_by_field_name("parameters")
+        name = source[name_node.start_byte : name_node.end_byte] if name_node else "anonymous"
         body = n.child_by_field_name("body")
         sig_text = source[n.start_byte : (body.start_byte if body else n.end_byte)]
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
@@ -331,11 +320,7 @@ class PythonExtractor(Extractor):
         decorated: Node | None = None,
     ) -> None:
         name_node = n.child_by_field_name("name")
-        name = (
-            source[name_node.start_byte : name_node.end_byte]
-            if name_node
-            else "anonymous"
-        )
+        name = source[name_node.start_byte : name_node.end_byte] if name_node else "anonymous"
         body = n.child_by_field_name("body")
         sig_text = source[n.start_byte : (body.start_byte if body else n.end_byte)]
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
@@ -376,13 +361,11 @@ class PythonExtractor(Extractor):
             mod_name = source[mod.start_byte : mod.end_byte] if mod else ""
             for c in n.children_by_field_name("name"):
                 names.append(
-                    f"{mod_name}.{source[c.start_byte : c.end_byte].split(' as ')[0].strip()}"
+                    f"{mod_name}.{source[c.start_byte : c.end_byte].split(' as ', maxsplit=1)[0].strip()}"
                 )
         else:
             for c in n.children_by_field_name("name"):
-                names.append(
-                    source[c.start_byte : c.end_byte].replace(" as ", " ").split()[0]
-                )
+                names.append(source[c.start_byte : c.end_byte].replace(" as ", " ").split()[0])
         if not names:
             names = [source[n.start_byte : n.end_byte]]
         return Unit(

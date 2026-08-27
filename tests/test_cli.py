@@ -1,6 +1,6 @@
-import urag.cli as cli
 from typer.testing import CliRunner
 
+import urag.cli as cli
 from urag.config import load_config
 from urag.db import Database
 

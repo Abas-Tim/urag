@@ -3,7 +3,6 @@
 import asyncio
 import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -11,7 +10,7 @@ from urag.config import load_config
 from urag.db import Database
 from urag.embed import NoopEmbedder
 from urag.indexer import Indexer
-from urag.mcp_server import create_server, _evidence_budget
+from urag.mcp_server import _evidence_budget, create_server
 from urag.retrieve import Retriever
 
 APP_PY = '''from auth import validate_token
@@ -72,7 +71,7 @@ def _call(server, name, arguments):
 def test_evidence_budget_distribution():
     assert _evidence_budget(1500, 1) == 1500
     assert _evidence_budget(1500, 5) == 300
-    assert _evidence_budget(100, 5) == 200
+    assert _evidence_budget(100, 5) == 20
 
 
 def test_config_and_env_files_indexed(project):
@@ -119,9 +118,7 @@ def test_children_of_class(project):
 def test_siblings_of_method(project):
     cfg, db = project
     validate_id = _unit_id(db, "validate")
-    result = Retriever(cfg, db, NoopEmbedder()).children(
-        validate_id, include_siblings=True
-    )
+    result = Retriever(cfg, db, NoopEmbedder()).children(validate_id, include_siblings=True)
     names = {r.unit.name for r in result.results}
     assert "is_expired" in names
 
@@ -179,9 +176,7 @@ def test_mcp_new_tools(project):
     assert "app.py" in {r["path"] for r in deps["results"]}
 
     symbols = _call(server, "list_symbols", {"file": "app.py"})
-    assert {"TokenValidator", "handle_request"} <= {
-        r["name"] for r in symbols["results"]
-    }
+    assert {"TokenValidator", "handle_request"} <= {r["name"] for r in symbols["results"]}
 
     read = _call(server, "read_file", {"path": "auth.py", "start": 1, "end": 1})
     assert "def validate_token" in read["span"]
@@ -234,9 +229,7 @@ def test_mcp_unit_resource(project):
 
 def test_recent_changes_in_git_repo(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "t@example.com"], cwd=str(tmp_path), check=True
-    )
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=str(tmp_path), check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=str(tmp_path), check=True)
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "a.py"], cwd=str(tmp_path), check=True)

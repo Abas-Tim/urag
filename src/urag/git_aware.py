@@ -122,7 +122,7 @@ class Git:
         )
         if log:
             for block in log.split("\n\n"):
-                lines = [l for l in block.splitlines() if l]
+                lines = [ln for ln in block.splitlines() if ln]
                 if not lines:
                     continue
                 fields = lines[0].split("\x1f")
@@ -134,7 +134,7 @@ class Git:
                         "short": fields[1],
                         "subject": fields[2],
                         "date": fields[3],
-                        "files": [Path(l).as_posix() for l in lines[1:]],
+                        "files": [Path(ln).as_posix() for ln in lines[1:]],
                     }
                 )
         return result

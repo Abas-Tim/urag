@@ -59,16 +59,20 @@ class _Handler(FileSystemEventHandler):
             self._pending.update(paths)
             if self._timer:
                 self._timer.cancel()
-            self._timer = threading.Timer(self.debounce, self._flush)
+            self._timer = threading.Timer(
+                self.debounce, lambda: self._flush(self._timer)
+            )
             self._timer.daemon = True
             self._timer.start()
 
-    def _flush(self) -> None:
+    def _flush(self, timer: threading.Timer | None = None) -> None:
         with self._flush_lock:
             with self._lock:
+                if timer is not None and self._timer is not timer:
+                    return
+                self._timer = None
                 paths = list(self._pending)
                 self._pending.clear()
-                self._timer = None
             if not paths:
                 return
             try:

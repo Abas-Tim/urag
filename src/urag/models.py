@@ -12,20 +12,6 @@ from dataclasses import dataclass, field
 UNIT_KIND_SYMBOL = "symbol"
 UNIT_KIND_CHUNK = "chunk"
 
-SYMBOL_TYPES = {
-    "function",
-    "class",
-    "method",
-    "import",
-    "interface",
-    "type_alias",
-    "variable",
-    "enum",
-    "file",
-}
-
-CHUNK_TYPES = {"doc_chunk", "doc_file"}
-
 
 @dataclass
 class Unit:
@@ -65,10 +51,6 @@ class Unit:
     def is_symbol(self) -> bool:
         return self.kind == UNIT_KIND_SYMBOL
 
-    @property
-    def is_chunk(self) -> bool:
-        return self.kind == UNIT_KIND_CHUNK
-
 
 @dataclass
 class SourceFile:
@@ -83,10 +65,6 @@ class SourceFile:
     sha256: str = ""
     commit: str = ""
     indexed_at: str = ""
-
-    @property
-    def is_stale(self) -> bool:
-        return self.size == 0
 
 
 @dataclass
@@ -105,9 +83,8 @@ class RetrievedUnit:
     hop: int = 0
     ref_kind: str = ""
     resolved_target: str = ""
-    evidence: str | None = None
 
-    def to_dict(self, include_evidence: bool = False) -> dict:
+    def to_dict(self) -> dict:
         u = self.unit
         d = {
             "id": u.id,
@@ -133,8 +110,6 @@ class RetrievedUnit:
             d["ref_kind"] = self.ref_kind
         if self.resolved_target:
             d["resolved_to"] = self.resolved_target
-        if include_evidence and self.evidence is not None:
-            d["evidence"] = self.evidence
         return d
 
 

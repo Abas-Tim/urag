@@ -7,14 +7,16 @@ qualname prefixes (receiver types, impl types, namespaces, classes).
 
 from __future__ import annotations
 
-from tree_sitter import Language, Node, Parser
-import tree_sitter_go as tsgo
-import tree_sitter_rust as tsrust
-import tree_sitter_java as tsjava
+import re
+
 import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
+import tree_sitter_go as tsgo
+import tree_sitter_java as tsjava
+import tree_sitter_rust as tsrust
+from tree_sitter import Language, Node, Parser
 
-from ..models import Unit, UNIT_KIND_SYMBOL
+from ..models import UNIT_KIND_SYMBOL, Reference, Unit
 from .base import (
     ByteIndexedSource,
     Extractor,
@@ -30,14 +32,21 @@ _PARSERS: dict[str, Parser] = {}
 
 _IDENT_TYPES = {"identifier", "type_identifier", "field_identifier"}
 
-_CALL_TYPES = {"call_expression": "function", "method_invocation": None}
-
 
 def _parser(language: str) -> Parser:
     if language not in _PARSERS:
-        mod = {"go": tsgo, "rust": tsrust, "java": tsjava, "c": tsc, "cpp": tscpp}[
-            language
-        ]
+        if language == "csharp":
+            import tree_sitter_c_sharp as tscs
+
+            mod = tscs
+        else:
+            mod = {
+                "go": tsgo,
+                "rust": tsrust,
+                "java": tsjava,
+                "c": tsc,
+                "cpp": tscpp,
+            }[language]
         p = Parser()
         p.language = Language(mod.language())
         _PARSERS[language] = p
@@ -54,9 +63,7 @@ def _field(n: Node, name: str) -> Node | None:
 
 
 def _doc(lines: list[str], start_line: int) -> str:
-    return leading_comments(lines, start_line, "//") or leading_comments(
-        lines, start_line, "/*"
-    )
+    return leading_comments(lines, start_line, "//") or leading_comments(lines, start_line, "/*")
 
 
 def _concepts(n: Node, source: str, limit: int = 6) -> str:
@@ -120,20 +127,6 @@ def _name_of(n: Node, source: str) -> str:
     return "anonymous"
 
 
-def _walk_units(
-    node: Node,
-    source: str,
-    lines: list[str],
-    prefix: str,
-    units: list[Unit],
-    func_types: set[str],
-    class_types: dict[str, str],
-    walk_fn,
-) -> None:
-    for child in node.named_children:
-        walk_fn(child, source, lines, prefix, units)
-
-
 def _walk_invocations(
     node: Node,
     source: str,
@@ -153,9 +146,7 @@ def _walk_invocations(
             if name is not None:
                 full = source[name.start_byte : name.end_byte]
                 obj = cur.child_by_field_name(object_field)
-                chain = (
-                    f"{source[obj.start_byte : obj.end_byte]}.{full}" if obj else full
-                )
+                chain = f"{source[obj.start_byte : obj.end_byte]}.{full}" if obj else full
                 out.append(
                     CallSite(
                         callee=split_callee(chain),
@@ -224,9 +215,7 @@ class GoExtractor(Extractor):
                     out.append(
                         (
                             source[alias.start_byte : alias.end_byte],
-                            source[path.start_byte : path.end_byte]
-                            .strip('"')
-                            .replace("/", "."),
+                            source[path.start_byte : path.end_byte].strip('"').replace("/", "."),
                         )
                     )
             stack.extend(reversed(cur.named_children))
@@ -235,7 +224,6 @@ class GoExtractor(Extractor):
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
         body = _field(n, "body")
-        params = _field(n, "parameters") or _field(n, "result")
         qualname = f"{prefix}.{name}" if prefix else name
         return _make(
             n,
@@ -254,16 +242,10 @@ class GoExtractor(Extractor):
     ) -> None:
         name = _name_of(n, source)
         type_node = _field(n, "type") or next(
-            (
-                c
-                for c in n.named_children
-                if c.type in ("struct_type", "interface_type")
-            ),
+            (c for c in n.named_children if c.type in ("struct_type", "interface_type")),
             None,
         )
-        unit_type = (
-            "struct" if type_node and type_node.type == "struct_type" else "interface"
-        )
+        unit_type = "struct" if type_node and type_node.type == "struct_type" else "interface"
         qualname = f"{prefix}.{name}" if prefix else name
         body = None
         if type_node:
@@ -283,9 +265,7 @@ class GoExtractor(Extractor):
         for s in specs:
             path = source[s.start_byte : s.end_byte].strip('"').strip()
             alias = _field(s, "name")
-            names.append(
-                f"{source[alias.start_byte : alias.end_byte]}:{path}" if alias else path
-            )
+            names.append(f"{source[alias.start_byte : alias.end_byte]}:{path}" if alias else path)
         first = names[0] if names else "import"
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         return Unit(
@@ -332,9 +312,7 @@ class RustExtractor(Extractor):
                     None,
                 )
                 impl_type = (
-                    source[type_node.start_byte : type_node.end_byte]
-                    if type_node
-                    else "impl"
+                    source[type_node.start_byte : type_node.end_byte] if type_node else "impl"
                 )
                 decl = next(
                     (c for c in child.named_children if c.type == "declaration_list"),
@@ -375,7 +353,7 @@ class RustExtractor(Extractor):
                         prefixes.insert(0, source[base.start_byte : base.end_byte])
                     parent = parent.parent
                 if prefixes and "::" not in path:
-                    path = "::".join(prefixes + [path])
+                    path = "::".join([*prefixes, path])
                 if alias.isidentifier() and path:
                     out.append((alias, path))
             stack.extend(reversed(cur.named_children))
@@ -384,7 +362,6 @@ class RustExtractor(Extractor):
     def _func(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
         body = _field(n, "body")
-        params = _field(n, "parameters")
         qualname = f"{prefix}::{name}" if prefix else name
         return _make(
             n,
@@ -398,17 +375,14 @@ class RustExtractor(Extractor):
             concepts=_concepts(n, source),
         )
 
-    def _type(
-        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
-    ) -> None:
+    def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
         qualname = f"{prefix}::{name}" if prefix else name
         body = next(
             (
                 c
                 for c in n.named_children
-                if c.type
-                in ("field_declaration_list", "enum_variant_list", "declaration_list")
+                if c.type in ("field_declaration_list", "enum_variant_list", "declaration_list")
             ),
             None,
         )
@@ -420,12 +394,7 @@ class RustExtractor(Extractor):
         units.append(_make(n, source, lines, "", unit_type, name, qualname, body))
 
     def _import(self, n: Node, source: str) -> Unit:
-        name = (
-            source[n.start_byte : n.end_byte]
-            .replace("use ", "")
-            .replace(";", "")
-            .strip()
-        )
+        name = source[n.start_byte : n.end_byte].replace("use ", "").replace(";", "").strip()
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         return Unit(
             file_id=0,
@@ -569,9 +538,7 @@ class JavaExtractor(Extractor):
                     node = cur.child_by_field_name(field)
                     if node is None:
                         continue
-                    children = (
-                        node.named_children if field == "superinterfaces" else [node]
-                    )
+                    children = node.named_children if field == "superinterfaces" else [node]
                     for child in children:
                         append(child, "base")
             elif t == "generic_type":
@@ -595,11 +562,7 @@ class JavaExtractor(Extractor):
             if cur.type == "import_declaration":
                 raw = source[cur.start_byte : cur.end_byte]
                 imported = next(
-                    (
-                        child
-                        for child in cur.named_children
-                        if child.type == "scoped_identifier"
-                    ),
+                    (child for child in cur.named_children if child.type == "scoped_identifier"),
                     None,
                 )
                 if imported and ".*" not in raw:
@@ -612,7 +575,6 @@ class JavaExtractor(Extractor):
     def _method(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = _name_of(n, source)
         body = _field(n, "body")
-        params = _field(n, "parameters")
         qualname = f"{prefix}.{name}" if prefix else name
         return _make(
             n,
@@ -626,9 +588,7 @@ class JavaExtractor(Extractor):
             concepts=_concepts(n, source),
         )
 
-    def _type(
-        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
-    ) -> None:
+    def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
         qualname = f"{prefix}.{name}" if prefix else name
         body_field = {
@@ -643,12 +603,7 @@ class JavaExtractor(Extractor):
             self._walk(body, source, lines, qualname, units)
 
     def _import(self, n: Node, source: str) -> Unit:
-        name = (
-            source[n.start_byte : n.end_byte]
-            .replace("import ", "")
-            .replace(";", "")
-            .strip()
-        )
+        name = source[n.start_byte : n.end_byte].replace("import ", "").replace(";", "").strip()
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         return Unit(
             file_id=0,
@@ -707,9 +662,7 @@ class CExtractor(Extractor):
                     None,
                 )
                 if decl and decl.type == "function_definition":
-                    self._append_function(
-                        units, self._func(decl, source, lines, prefix)
-                    )
+                    self._append_function(units, self._func(decl, source, lines, prefix))
                 elif decl and decl.type in ("class_specifier", "struct_specifier"):
                     self._type(decl, source, lines, prefix, units)
             elif t in (
@@ -723,11 +676,7 @@ class CExtractor(Extractor):
                 self._typedef(child, source, lines, prefix, units)
             elif t == "namespace_definition":
                 ns = _field(child, "name") or next(
-                    (
-                        c
-                        for c in child.named_children
-                        if c.type == "namespace_identifier"
-                    ),
+                    (c for c in child.named_children if c.type == "namespace_identifier"),
                     None,
                 )
                 ns_name = source[ns.start_byte : ns.end_byte] if ns else "ns"
@@ -774,11 +723,7 @@ class CExtractor(Extractor):
         declared_prefix = ""
         if declarator:
             qualified = next(
-                (
-                    c
-                    for c in declarator.named_children
-                    if c.type == "qualified_identifier"
-                ),
+                (c for c in declarator.named_children if c.type == "qualified_identifier"),
                 None,
             )
             if qualified:
@@ -790,9 +735,7 @@ class CExtractor(Extractor):
         effective_prefix = f"{prefix}{declared_prefix}"
         qualname = f"{effective_prefix}{name}" if effective_prefix else name
         owner = effective_prefix.removesuffix("::")
-        unit_type = (
-            "method" if is_method or owner in self._class_qualnames else "function"
-        )
+        unit_type = "method" if is_method or owner in self._class_qualnames else "function"
         return _make(
             n,
             source,
@@ -820,10 +763,7 @@ class CExtractor(Extractor):
                 existing.unit_type == "method"
                 and (existing.qualname, self._parameter_key(existing.signature)) == key
             ):
-                if (
-                    unit.byte_end - unit.byte_start
-                    > existing.byte_end - existing.byte_start
-                ):
+                if unit.byte_end - unit.byte_start > existing.byte_end - existing.byte_start:
                     units[index] = unit
                 return
         units.append(unit)
@@ -840,9 +780,7 @@ class CExtractor(Extractor):
             stack.extend(reversed(cur.named_children))
         return "anonymous"
 
-    def _type(
-        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
-    ) -> None:
+    def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name_node = _field(n, "name") or next(
             (c for c in n.named_children if c.type in _IDENT_TYPES), None
         )
@@ -852,40 +790,24 @@ class CExtractor(Extractor):
         qualname = f"{prefix}{name}" if prefix else name
         if self.language == "cpp" and n.type in ("class_specifier", "struct_specifier"):
             self._class_qualnames.add(qualname)
-        body = next(
-            (c for c in n.named_children if c.type == "field_declaration_list"), None
-        )
+        body = next((c for c in n.named_children if c.type == "field_declaration_list"), None)
         unit_type = n.type.replace("_specifier", "")
         units.append(_make(n, source, lines, "", unit_type, name, qualname, body))
-        if (
-            self.language == "cpp"
-            and body
-            and n.type in ("class_specifier", "struct_specifier")
-        ):
+        if self.language == "cpp" and body and n.type in ("class_specifier", "struct_specifier"):
             for member in body.named_children:
                 if member.type == "function_definition":
                     self._append_function(
                         units,
-                        self._func(
-                            member, source, lines, qualname + "::", is_method=True
-                        ),
+                        self._func(member, source, lines, qualname + "::", is_method=True),
                     )
                 elif member.type == "field_declaration":
                     declarator = next(
-                        (
-                            c
-                            for c in member.named_children
-                            if c.type == "function_declarator"
-                        ),
+                        (c for c in member.named_children if c.type == "function_declarator"),
                         None,
                     )
                     if declarator:
                         params = next(
-                            (
-                                c
-                                for c in declarator.named_children
-                                if c.type == "parameter_list"
-                            ),
+                            (c for c in declarator.named_children if c.type == "parameter_list"),
                             None,
                         )
                         name = self._declarator_name(declarator, params, source)
@@ -914,14 +836,8 @@ class CExtractor(Extractor):
             ),
             None,
         )
-        name_node = next(
-            (c for c in n.named_children if c.type == "type_identifier"), None
-        )
-        name = (
-            source[name_node.start_byte : name_node.end_byte]
-            if name_node
-            else "anonymous"
-        )
+        name_node = next((c for c in n.named_children if c.type == "type_identifier"), None)
+        name = source[name_node.start_byte : name_node.end_byte] if name_node else "anonymous"
         qualname = f"{prefix}{name}" if prefix else name
         body = next(
             (
@@ -960,11 +876,8 @@ class CSharpExtractor(Extractor):
     language = "csharp"
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
-        import tree_sitter_c_sharp as tscs
-
         source = ByteIndexedSource(source)
-        p = Parser()
-        p.language = Language(tscs.language())
+        p = _parser("csharp")
         tree = p.parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
@@ -972,11 +885,8 @@ class CSharpExtractor(Extractor):
         return units
 
     def collect_calls(self, source: str) -> list:
-        import tree_sitter_c_sharp as tscs
-
         source = ByteIndexedSource(source)
-        p = Parser()
-        p.language = Language(tscs.language())
+        p = _parser("csharp")
         tree = p.parse(source.encode("utf-8"))
         out: list = []
         stack: list[Node] = [tree.root_node]
@@ -985,20 +895,18 @@ class CSharpExtractor(Extractor):
             chain = None
             if cur.type == "invocation_expression":
                 first = cur.named_children[0] if cur.named_children else None
-                if first is not None:
-                    if first.type == "member_access_expression":
-                        chain = source[first.start_byte : first.end_byte]
-                    elif first.type in ("identifier", "generic_name"):
-                        chain = source[first.start_byte : first.end_byte]
+                if first is not None and (
+                    first.type == "member_access_expression"
+                    or first.type in ("identifier", "generic_name")
+                ):
+                    chain = source[first.start_byte : first.end_byte]
             elif cur.type == "object_creation_expression":
                 type_node = cur.child_by_field_name("type")
                 if type_node is not None and type_node.type not in (
                     "predefined_type",
                     "implicit_type",
                 ):
-                    chain = source[type_node.start_byte : type_node.end_byte].split(
-                        "<", 1
-                    )[0]
+                    chain = source[type_node.start_byte : type_node.end_byte].split("<", 1)[0]
             elif cur.type == "assignment_expression":
                 op = cur.child_by_field_name("operator")
                 right = cur.child_by_field_name("right")
@@ -1006,11 +914,9 @@ class CSharpExtractor(Extractor):
                     op is not None
                     and right is not None
                     and source[op.start_byte : op.end_byte] in ("+=", "-=")
+                    and (right.type == "identifier" or right.type == "member_access_expression")
                 ):
-                    if right.type == "identifier":
-                        chain = source[right.start_byte : right.end_byte]
-                    elif right.type == "member_access_expression":
-                        chain = source[right.start_byte : right.end_byte]
+                    chain = source[right.start_byte : right.end_byte]
             if chain:
                 from ..models import CallSite
 
@@ -1030,15 +936,8 @@ class CSharpExtractor(Extractor):
         """Type references: constructions, declared types, bases, generics,
         casts, typeof, attributes, x:Class-style bindings are handled by the
         XML extractor."""
-        import re
-
-        import tree_sitter_c_sharp as tscs
-
-        from ..models import Reference
-
         source = ByteIndexedSource(source)
-        p = Parser()
-        p.language = Language(tscs.language())
+        p = _parser("csharp")
         tree = p.parse(source.encode("utf-8"))
         out: list = []
         stack: list[Node] = [tree.root_node]
@@ -1057,13 +956,9 @@ class CSharpExtractor(Extractor):
                     for child in args.named_children:
                         self._append_ref(out, child, source, "generic")
             elif t == "attribute":
-                self._append_ref(
-                    out, cur.child_by_field_name("name"), source, "attribute"
-                )
+                self._append_ref(out, cur.child_by_field_name("name"), source, "attribute")
             elif t == "object_creation_expression":
-                self._append_ref(
-                    out, cur.child_by_field_name("type"), source, "construct"
-                )
+                self._append_ref(out, cur.child_by_field_name("type"), source, "construct")
             elif t in ("typeof_expression", "cast_expression", "declaration_pattern"):
                 self._append_ref(out, cur.child_by_field_name("type"), source, "cast")
             elif t == "as_expression":
@@ -1076,18 +971,12 @@ class CSharpExtractor(Extractor):
             ):
                 self._append_ref(out, cur.child_by_field_name("type"), source, "type")
             elif t == "method_declaration":
-                self._append_ref(
-                    out, cur.child_by_field_name("returns"), source, "type"
-                )
+                self._append_ref(out, cur.child_by_field_name("returns"), source, "type")
             stack.extend(reversed(cur.named_children))
         return dedupe_refs(out)
 
     @staticmethod
     def _append_ref(out: list, node, source, kind: str) -> None:
-        import re
-
-        from ..models import Reference
-
         if node is None or node.type in ("predefined_type", "implicit_type"):
             return
         text = source[node.start_byte : node.end_byte]
@@ -1108,11 +997,8 @@ class CSharpExtractor(Extractor):
 
     def collect_import_aliases(self, source: str) -> list[tuple[str, str]]:
         """`using Alias = Namespace.Type;` -> (Alias, Namespace.Type)."""
-        import tree_sitter_c_sharp as tscs
-
         source = ByteIndexedSource(source)
-        p = Parser()
-        p.language = Language(tscs.language())
+        p = _parser("csharp")
         tree = p.parse(source.encode("utf-8"))
         out: list[tuple[str, str]] = []
         stack: list[Node] = [tree.root_node]
@@ -1120,9 +1006,7 @@ class CSharpExtractor(Extractor):
             cur = stack.pop()
             if cur.type == "using_directive":
                 parts = [
-                    c
-                    for c in cur.named_children
-                    if c.type in ("identifier", "qualified_name")
+                    c for c in cur.named_children if c.type in ("identifier", "qualified_name")
                 ]
                 text = source[cur.start_byte : cur.end_byte]
                 if "=" in text and len(parts) == 2:
@@ -1152,11 +1036,7 @@ class CSharpExtractor(Extractor):
                 units.append(self._method(child, source, lines, prefix))
             elif t == "namespace_declaration":
                 ns = next(
-                    (
-                        c
-                        for c in child.named_children
-                        if c.type in ("qualified_name", "identifier")
-                    ),
+                    (c for c in child.named_children if c.type in ("qualified_name", "identifier")),
                     None,
                 )
                 ns_name = source[ns.start_byte : ns.end_byte] if ns else "ns"
@@ -1178,7 +1058,6 @@ class CSharpExtractor(Extractor):
     def _method(self, n: Node, source: str, lines: list[str], prefix: str) -> Unit:
         name = self._method_name(n, source)
         body = next((c for c in n.named_children if c.type == "block"), None)
-        params = next((c for c in n.named_children if c.type == "parameter_list"), None)
         qualname = f"{prefix}{name}" if prefix else name
         return _make(
             n,
@@ -1203,9 +1082,7 @@ class CSharpExtractor(Extractor):
         name = _field(n, "name")
         return source[name.start_byte : name.end_byte] if name else "anonymous"
 
-    def _type(
-        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
-    ) -> None:
+    def _type(self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]) -> None:
         name = _name_of(n, source)
         qualname = f"{prefix}{name}" if prefix else name
         body = next((c for c in n.named_children if c.type == "declaration_list"), None)
@@ -1215,12 +1092,7 @@ class CSharpExtractor(Extractor):
             self._walk(body, source, lines, qualname + ".", units)
 
     def _import(self, n: Node, source: str) -> Unit:
-        name = (
-            source[n.start_byte : n.end_byte]
-            .replace("using ", "")
-            .replace(";", "")
-            .strip()
-        )
+        name = source[n.start_byte : n.end_byte].replace("using ", "").replace(";", "").strip()
         (sl, sc), (el, ec) = _point(n, "start"), _point(n, "end")
         return Unit(
             file_id=0,

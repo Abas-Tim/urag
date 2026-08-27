@@ -12,13 +12,18 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .classify import BUDGETS, MODE_BY_CLASS, classify, top_k_for
 from .config import Config
 from .db import Database
 from .embed import Embedder
 from .git_aware import Git
-from .indexer import Indexer
 from .models import RetrievedUnit, Unit
-from .classify import BUDGETS
+
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.$:]*")
+_DEFINITION_HINT_RE = re.compile(r"\b(where\s+is|defined|definition)\b", re.IGNORECASE)
+_DEFINITION_RE = re.compile(
+    r"\s*(?:where\s+is|definition\s+of)\s+([A-Za-z_][A-Za-z0-9_.$:]*)", re.IGNORECASE
+)
 
 
 @dataclass
@@ -29,16 +34,14 @@ class SearchResult:
     query_class: str = "local"
     budget_tokens: int = 1500
 
-    def to_dict(self, include_evidence: bool = False) -> dict:
+    def to_dict(self) -> dict:
         return {
             "query": self.query,
             "mode": self.mode,
             "class": self.query_class,
             "budget_tokens": self.budget_tokens,
             "count": len(self.results),
-            "results": [
-                r.to_dict(include_evidence=include_evidence) for r in self.results
-            ],
+            "results": [r.to_dict() for r in self.results],
         }
 
 
@@ -62,11 +65,9 @@ def _rrf_scores(
 
 
 def _exact_symbol_ids(query: str, lexical: list[tuple[Unit, str, float]]) -> set[int]:
-    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_.$:]*", query)
+    tokens = _TOKEN_RE.findall(query)
     identifiers: set[str] = set()
-    definition_query = bool(
-        re.search(r"\b(where\s+is|defined|definition)\b", query, re.IGNORECASE)
-    )
+    definition_query = bool(_DEFINITION_HINT_RE.search(query))
     stop_words = {
         "a",
         "an",
@@ -200,8 +201,6 @@ class Retriever:
         language: str | None = None,
         query_class: str | None = None,
     ) -> SearchResult:
-        from .classify import BUDGETS, MODE_BY_CLASS, classify, top_k_for
-
         qc = query_class or classify(query)
         rc = self.cfg.retrieval
         budget = BUDGETS[qc]["tokens"]
@@ -210,7 +209,7 @@ class Retriever:
         default_k = top_k_for(qc)
         if top_k is None and rc.default_top_k > 0:
             default_k = min(default_k, rc.default_top_k)
-        k = top_k or default_k
+        k = top_k if top_k is not None else default_k
         if mode == "hybrid":
             target = self._definition_symbol(query)
             if target:
@@ -375,11 +374,7 @@ class Retriever:
 
     @staticmethod
     def _definition_symbol(query: str) -> str | None:
-        match = re.fullmatch(
-            r"\s*(?:where\s+is|definition\s+of)\s+(.+?)(?:\s+defined)?\s*[?.]*\s*",
-            query,
-            re.IGNORECASE,
-        )
+        match = _DEFINITION_RE.search(query)
         if not match:
             return None
         target = match.group(1).strip(" `\"'()[]")
@@ -388,8 +383,6 @@ class Retriever:
     @staticmethod
     def _impact_symbol(query: str) -> str | None:
         """Extract the target symbol from an impact query like 'what calls X'."""
-        import re
-
         keywords = (
             "calls",
             "uses",
@@ -478,9 +471,7 @@ class Retriever:
                     if depth == 0:
                         break
                     depth -= 1
-                elif char.isspace() and depth == 0:
-                    break
-                elif not (
+                elif (char.isspace() and depth == 0) or not (
                     char.isalnum()
                     or char in "_.$:,-"
                     or (depth > 0 and (char.isspace() or char == "*"))
@@ -626,6 +617,12 @@ class Retriever:
             return min(BUDGETS["impact"]["tokens"], maximum_tokens)
         return BUDGETS["impact"]["tokens"]
 
+    def _nav_budget(self, tokens: int) -> int:
+        maximum_tokens = self.cfg.retrieval.max_evidence_tokens
+        if maximum_tokens > 0:
+            return min(tokens, maximum_tokens)
+        return tokens
+
     def get(self, unit_id: int) -> dict | None:
         ev = self.db.load_evidence(unit_id)
         if ev and ev.get("file"):
@@ -672,7 +669,13 @@ class Retriever:
         stale = self._stale_map([r.file_path for r in results])
         for r in results:
             r.stale = stale.get(r.file_path, False)
-        return SearchResult(results, "resolve", f"definition of {name}", "symbol", 800)
+        return SearchResult(
+            results,
+            "resolve",
+            f"definition of {name}",
+            "symbol",
+            self._nav_budget(800),
+        )
 
     def children(self, unit_id: int, include_siblings: bool = False) -> SearchResult:
         units = (
@@ -699,7 +702,9 @@ class Retriever:
         for r in results:
             r.stale = stale.get(r.file_path, False)
         mode = "siblings" if include_siblings else "children"
-        return SearchResult(results, mode, f"unit {unit_id}", "local", 2000)
+        return SearchResult(
+            results, mode, f"unit {unit_id}", "local", self._nav_budget(2000)
+        )
 
     def callees(self, unit_id: int) -> dict | None:
         got = self.db.unit_by_id(unit_id)
@@ -740,7 +745,13 @@ class Retriever:
         stale = self._stale_map([path])
         for r in results:
             r.stale = stale.get(path, False)
-        return SearchResult(results, "symbols", f"symbols in {path}", "local", 2000)
+        return SearchResult(
+            results,
+            "symbols",
+            f"symbols in {path}",
+            "local",
+            self._nav_budget(2000),
+        )
 
     def read_file(
         self, path: str, start: int | None = None, end: int | None = None

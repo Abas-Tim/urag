@@ -132,9 +132,5 @@ def classify(query: str) -> str:
     return "local"
 
 
-def budget_for(qclass: str) -> int:
-    return BUDGETS.get(qclass, BUDGETS["local"])["tokens"]
-
-
 def top_k_for(qclass: str) -> int:
     return BUDGETS.get(qclass, BUDGETS["local"])["top_k"]

@@ -1,23 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 - 2026-08-26
 
 - Added a reference index (type mentions, constructions, bases, generics,
   casts, attributes) for Python, TypeScript/JavaScript, Java, and C#, plus
   `urag references` / MCP `references` with multi-hop traversal. `callers`
-  now also matches object constructions (`new MainWindow()`).
+  now also matches object constructions (`new MainWindow()`) and event
+  subscriptions (`Handler += ...`).
 - Added XML family support (`.xaml`, `.axaml`, `.xml`, `.csproj`, `.props`,
   `.targets`): `x:Class` classes, `x:Key` resources, `DataTemplate`
   templates, event handlers, and markup references (`{x:Static}`,
-  `{StaticResource}`, element tags) feed search and the reference index.
+  `{StaticResource}`, element tags, attached properties) feed search and the
+  reference index.
 - Added `urag deadcode` / MCP `dead_symbols`: heuristic candidates with no
   incoming calls or references.
 - Impact queries mentioning "references"/"uses" now route to the reference
   index instead of the call graph.
 - Indexing UX: flushed live progress with embedding rate/ETA, an
   embedder-load notice (first run downloads the model), and resume guidance
-  for interrupted first indexes.
-- CLI: `urag read FILE START END` now accepts positional line ranges.
+  for interrupted first indexes. Indexes built by older extractors are
+  re-extracted automatically on the next `urag index`.
+- CLI: `urag read FILE START END` now accepts positional line ranges;
+  `urag doctor` hints when XML family files exist but the config predates
+  XAML support.
 - Evaluation: `eval --reference N` auto-generates reference questions with
   provable gold and a `urag-references` system; the benchmark suite covers
   the new capability.

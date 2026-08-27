@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4 - 2026-08-26
+
+- Retrieval: route explicit definition queries through exact structural symbol
+  resolution and prioritize qualified exact matches.
+- Retrieval: improve impact target parsing for C++ member chains, C# generic
+  expressions, and symbols whose names overlap with English verbs.
+- Benchmarks: add adaptive production retrieval and per-label metrics, and
+  harden reusable question validation, root selection, and ambiguity handling.
+- Benchmarks: validate retrieval improvements across Python, C#, C++, and the
+  URAG repository.
+
 ## 0.1.3.1 - 2026-08-13
 
 - Benchmarks: added opencode-style baselines (`rg` grep emulation with

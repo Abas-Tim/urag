@@ -4,13 +4,15 @@ Version scheme: <next patch of the latest stable tag>.dev<commits since tag>.
 Example: latest stable tag v0.2.0, 3 commits on main -> 0.2.1.dev3.
 
 Prints the version to stdout, or "SKIP" (details on stderr) when there is
-nothing to publish (no stable tags yet, or HEAD is a tagged commit).
+nothing to publish (no stable tags yet, HEAD is a tagged commit, or the
+HEAD commit is a release-prep commit).
 
 Side effects: rewrites the `version` line in pyproject.toml and
 `__version__` in src/urag/__init__.py so the built artifacts carry the
 derived version. Intended for CI runners only.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +39,11 @@ def skip(reason: str) -> None:
     print(reason, file=sys.stderr)
     print("SKIP")
 
+
+head_message = os.environ.get("HEAD_MESSAGE") or git("log", "-1", "--pretty=%s")
+if "chore(release)" in head_message:
+    skip("release-prep commit; stable tag flow publishes it")
+    raise SystemExit(0)
 
 tags = git("tag", "--list", "v[0-9]*").splitlines()
 stable = [t[1:] for t in tags if STABLE_TAG.match(t)]

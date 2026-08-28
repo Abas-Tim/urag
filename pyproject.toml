@@ -1,6 +1,6 @@
 [project]
 name = "urag-cli"
-version = "0.1.5"
+version = "0.2.0a1"
 description = "Universal Repository Agent Graph: structure-aware, token-efficient RAG for projects"
 readme = "README.md"
 license = { text = "MIT" }

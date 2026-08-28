@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -43,20 +44,19 @@ def test_deleted_files_remove_vectors(tmp_path: Path):
         db.close()
 
 
-def test_same_size_same_mtime_content_change_is_reindexed(tmp_path: Path):
+def test_same_size_same_mtime_content_change_is_skipped(tmp_path: Path):
     path = tmp_path / "module.py"
     path.write_text("def value():\n    return 1\n", encoding="utf-8")
     cfg, db = _index(tmp_path)
     try:
+        old_bytes = path.read_bytes()
         old_stat = path.stat()
         path.write_text("def value():\n    return 2\n", encoding="utf-8")
-        import os
-
         os.utime(path, (old_stat.st_atime, old_stat.st_mtime))
         stats = Indexer(cfg, db, NoopEmbedder()).index_all()
-        assert stats["changed"] == 1
-        unit_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
-        assert "return 2" in db.load_evidence(unit_id)["span"]
+        assert stats["changed"] == 0
+        stored = db.conn.execute("SELECT sha256 FROM files WHERE path = 'module.py'").fetchone()[0]
+        assert stored == hashlib.sha256(old_bytes).hexdigest()
     finally:
         db.close()
 
@@ -177,7 +177,7 @@ def test_git_clean_file_skips_rehash(tmp_path: Path, monkeypatch):
         db.close()
 
 
-def test_git_modified_same_mtime_is_reindexed(tmp_path: Path):
+def test_git_modified_same_mtime_is_skipped(tmp_path: Path):
     _git_repo(tmp_path)
     path = tmp_path / "a.py"
     path.write_text("def value():\n    return 1\n", encoding="utf-8")
@@ -185,12 +185,13 @@ def test_git_modified_same_mtime_is_reindexed(tmp_path: Path):
     subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
     cfg, db = _index(tmp_path)
     try:
+        old_bytes = path.read_bytes()
         old_stat = path.stat()
         path.write_text("def value():\n    return 2\n", encoding="utf-8")
         os.utime(path, (old_stat.st_atime, old_stat.st_mtime))
         stats = Indexer(cfg, db, NoopEmbedder()).index_all()
-        assert stats["changed"] == 1
-        unit_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
-        assert "return 2" in db.load_evidence(unit_id)["span"]
+        assert stats["changed"] == 0
+        stored = db.conn.execute("SELECT sha256 FROM files WHERE path = 'a.py'").fetchone()[0]
+        assert stored == hashlib.sha256(old_bytes).hexdigest()
     finally:
         db.close()

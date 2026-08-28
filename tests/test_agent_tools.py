@@ -161,33 +161,33 @@ def test_mcp_new_tools(project):
     cfg, db = project
     server = create_server(cfg.project_root)
 
-    files = _call(server, "list_files", {})
+    files = _call(server, "urag_list_files", {})
     assert files["count"] >= 4
 
-    resolved = _call(server, "resolve", {"name": "validate_token"})
+    resolved = _call(server, "urag_resolve", {"name": "validate_token"})
     assert resolved["count"] >= 1
     assert resolved["results"][0]["file"] == "auth.py"
 
     validate_id = _unit_id(db, "validate")
-    callees = _call(server, "callees", {"unit_id": validate_id})
+    callees = _call(server, "urag_callees", {"unit_id": validate_id})
     assert "validate_token" in {c["callee"] for c in callees["callees"]}
 
-    deps = _call(server, "dependents", {"target": "auth"})
+    deps = _call(server, "urag_dependents", {"target": "auth"})
     assert "app.py" in {r["path"] for r in deps["results"]}
 
-    symbols = _call(server, "list_symbols", {"file": "app.py"})
+    symbols = _call(server, "urag_list_symbols", {"file": "app.py"})
     assert {"TokenValidator", "handle_request"} <= {r["name"] for r in symbols["results"]}
 
-    read = _call(server, "read_file", {"path": "auth.py", "start": 1, "end": 1})
+    read = _call(server, "urag_read_file", {"path": "auth.py", "start": 1, "end": 1})
     assert "def validate_token" in read["span"]
 
-    fetched = _call(server, "fetch_unit", {"unit_id": validate_id})
+    fetched = _call(server, "urag_fetch_unit", {"unit_id": validate_id})
     assert fetched["name"] == "validate"
     assert "span" in fetched
 
     batch = _call(
         server,
-        "fetch_units",
+        "urag_fetch_units",
         {"unit_ids": [_unit_id(db, "validate_token"), _unit_id(db, "handle_request")]},
     )
     assert batch["count"] == 2
@@ -200,7 +200,7 @@ def test_mcp_init_project_lexical_only(tmp_path):
     cfg.embedding.provider = "none"
     cfg.save()
     server = create_server(tmp_path)
-    result = _call(server, "init_project", {"embed": False})
+    result = _call(server, "urag_init_project", {"embed": False})
     assert result["initialized"] is True
     assert result["units"] >= 1
     assert result["embedded"] == 0
@@ -208,9 +208,9 @@ def test_mcp_init_project_lexical_only(tmp_path):
 
 def test_mcp_status_includes_git_and_next_step(tmp_path):
     server = create_server(tmp_path)
-    status = _call(server, "status", {})
-    assert status["error"] == "index missing; call init_project"
-    assert "init_project" in status["next"]
+    status = _call(server, "urag_status", {})
+    assert status["error"] == "index missing; call urag_init_project"
+    assert "urag_init_project" in status["next"]
 
 
 def test_mcp_unit_resource(project):
@@ -240,7 +240,7 @@ def test_recent_changes_in_git_repo(tmp_path):
     cfg.embedding.provider = "none"
     cfg.save()
     server = create_server(tmp_path)
-    result = _call(server, "recent_changes", {"limit": 5})
+    result = _call(server, "urag_recent_changes", {"limit": 5})
     assert result["branch"] == "master" or result["branch"] == "main"
     assert "b.py" in result["working"]["untracked"]
     assert result["commits"][0]["subject"] == "initial"

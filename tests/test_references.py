@@ -321,13 +321,13 @@ def test_mcp_references_and_dead_symbols(refdb):
         result = asyncio.run(server.call_tool(name, arguments))
         return json.loads(result.content[0].text)
 
-    refs = call("references", {"name": "MainWindow"})
+    refs = call("urag_references", {"name": "MainWindow"})
     files = {r["file"] for r in refs["results"]}
     assert "Program.cs" in files
     assert "MainWindow.axaml" in files
     assert any(r.get("ref_kind") == "construct" for r in refs["results"])
 
-    dead = call("dead_symbols", {"limit": 100})
+    dead = call("urag_dead_symbols", {"limit": 100})
     names = {r["name"] for r in dead["results"]}
     assert "LegacyWidget" in names
     assert "MainWindow" not in names
@@ -350,9 +350,7 @@ def test_cli_read_positional_range(tmp_path):
     db.close()
     (tmp_path / "doc.md").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
 
-    result = CliRunner().invoke(
-        cli.app, ["read", "doc.md", "2", "3", "--root", str(tmp_path)]
-    )
+    result = CliRunner().invoke(cli.app, ["read", "doc.md", "2", "3", "--root", str(tmp_path)])
     assert result.exit_code == 0
     assert "two\nthree" in result.output
     assert "four" not in result.output

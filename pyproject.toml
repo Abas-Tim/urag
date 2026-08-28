@@ -99,6 +99,7 @@ ignore = [
 "src/urag/db.py" = ["S608"]
 "src/urag/db_edges.py" = ["S608"]
 "src/urag/db_search.py" = ["S608"]
+"scripts/*.py" = ["S603", "S607"]
 "src/urag/git_aware.py" = ["S603", "S607"]
 "src/urag/extractors/xml_ext.py" = ["S314"]
 "tests/**" = ["B008", "RUF059", "RUF100", "PLR0402", "S101", "S104", "S311", "S603", "S607", "S608", "B905", "B904", "TRY003"]

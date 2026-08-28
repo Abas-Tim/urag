@@ -776,6 +776,7 @@ def read_cmd(
     ),
     start_opt: Optional[int] = typer.Option(None, "--start", help="first line (1-based)"),
     end_opt: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
     """Read a file (or a line range) from the project."""
     from .git_aware import Git
@@ -787,6 +788,11 @@ def read_cmd(
             start=start_opt if start_opt is not None else start,
             end=end_opt if end_opt is not None else end,
         )
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if "error" in result:
+                raise typer.Exit(1)
+            return
         if "error" in result:
             error_console.print(f"[yellow]{result['error']}[/yellow]")
             raise typer.Exit(1)
@@ -834,11 +840,31 @@ def recent_cmd(
 
 
 @app.command()
-def status(root: Path = typer.Option(".", help="project root")):
+def status(
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
     """Show index stats."""
     cfg, db = _engine(root)
     s = db.stats()
     db.close()
+    if json_out:
+        payload = {
+            "root": str(cfg.project_root.resolve()),
+            "files": s.files,
+            "units": s.units,
+            "embedded": s.embedded,
+            "db_size_kib": round(s.size_bytes / 1024),
+            "last_indexed": s.last_indexed,
+            "embedding": {
+                "provider": cfg.embedding.provider,
+                "model": cfg.embedding.model,
+                "dimension": cfg.embedding.dimension,
+            },
+            "by_language": s.by_language,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
     t = Table(title=f"urag index — {cfg.project_root}")
     t.add_column("metric")
     t.add_column("value")
@@ -855,33 +881,64 @@ def status(root: Path = typer.Option(".", help="project root")):
 
 
 @app.command()
-def doctor(root: Path = typer.Option(".", help="project root")):
+def doctor(
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
     """Check the installation and index health."""
     cfg, db = _engine(root)
     ok = True
     db.close()
-    console.print(f"[bold]project:[/bold] {cfg.project_root}")
-    console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    hints: list[str] = []
     if "xml" not in cfg.index.languages:
         xml_hits = _find_xml_family_files(cfg)
         if xml_hits:
-            console.print(
-                f"[yellow]hint: {xml_hits} XML-family file(s) found but 'xml' is not in "
+            hint = (
+                f"{xml_hits} XML-family file(s) found but 'xml' is not in "
                 "index.languages (config predates XAML support); add it to "
-                ".urag/urag.toml and re-run `urag index` to close the markup blind spot[/yellow]"
+                ".urag/urag.toml and re-run `urag index` to close the markup blind spot"
             )
+            hints.append(hint)
+    embedding: dict = {"provider": cfg.embedding.provider}
     if cfg.embedding.provider == "local":
         cache = default_model_cache_dir()
-        console.print(f"[bold]model cache:[/bold] {cache}")
+        embedding["model"] = cfg.embedding.model
+        embedding["cache"] = str(cache)
         try:
             emb = create_embedder(cfg.embedding)
             emb.embed_query("probe")
-            console.print(
-                f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({emb.dimension}d)"
-            )
+            embedding["status"] = "ok"
+            embedding["dimension"] = emb.dimension
         except Exception as exc:
             ok = False
-            console.print(f"[bold]embedding:[/bold] [red]FAILED — {exc}[/red]")
+            embedding["status"] = "failed"
+            embedding["error"] = str(exc)
+    if json_out:
+        payload = {
+            "ok": ok,
+            "root": str(cfg.project_root.resolve()),
+            "index": str(cfg.db_path),
+            "embedding": embedding,
+            "hints": hints,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if not ok:
+            raise typer.Exit(1)
+        return
+    console.print(f"[bold]project:[/bold] {cfg.project_root}")
+    console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    for hint in hints:
+        console.print(f"[yellow]hint: {hint}[/yellow]")
+    if cfg.embedding.provider == "local":
+        console.print(f"[bold]model cache:[/bold] {embedding.get('cache', '')}")
+        if embedding.get("status") == "ok":
+            console.print(
+                f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({embedding['dimension']}d)"
+            )
+        else:
+            console.print(
+                f"[bold]embedding:[/bold] [red]FAILED — {embedding.get('error', '')}[/red]"
+            )
     else:
         console.print(f"[bold]embedding:[/bold] {cfg.embedding.provider}")
     if not ok:

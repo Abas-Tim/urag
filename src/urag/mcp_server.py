@@ -28,6 +28,9 @@ _embedder_cache: dict[str, Embedder] = {}
 
 INSTRUCTIONS = """You are connected to urag, a structure-aware project index.
 
+Server tool names are short (search, fetch_unit, ...); harnesses expose them
+prefixed with the server name — e.g. urag_search, urag_fetch_unit.
+
 Token-conscious workflow:
 1. If `status` reports no index, call `init_project` (or `init_project`
    with embed=false for a fast lexical-only index) before searching.

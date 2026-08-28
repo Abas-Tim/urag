@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 from urag.config import load_config
@@ -146,5 +148,49 @@ def test_alias_bindings_are_removed_on_reindex(tmp_path: Path):
         path.write_text("def check(path):\n    return exists(path)\n", encoding="utf-8")
         Indexer(cfg, db, NoopEmbedder()).index_all()
         assert db.conn.execute("SELECT count(*) FROM import_aliases").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def _git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(root), check=True)
+
+
+def test_git_clean_file_skips_rehash(tmp_path: Path, monkeypatch):
+    _git_repo(tmp_path)
+    (tmp_path / "a.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
+    cfg, db = _index(tmp_path)
+    try:
+        import hashlib as _hashlib
+
+        def boom(data, *args, **kwargs):
+            raise AssertionError("rehash should be skipped for git-clean files")
+
+        monkeypatch.setattr(_hashlib, "sha256", boom)
+        stats = Indexer(cfg, db, NoopEmbedder()).index_all()
+        assert stats["changed"] == 0
+    finally:
+        db.close()
+
+
+def test_git_modified_same_mtime_is_reindexed(tmp_path: Path):
+    _git_repo(tmp_path)
+    path = tmp_path / "a.py"
+    path.write_text("def value():\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
+    cfg, db = _index(tmp_path)
+    try:
+        old_stat = path.stat()
+        path.write_text("def value():\n    return 2\n", encoding="utf-8")
+        os.utime(path, (old_stat.st_atime, old_stat.st_mtime))
+        stats = Indexer(cfg, db, NoopEmbedder()).index_all()
+        assert stats["changed"] == 1
+        unit_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
+        assert "return 2" in db.load_evidence(unit_id)["span"]
     finally:
         db.close()

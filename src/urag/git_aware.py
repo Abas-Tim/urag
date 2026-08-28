@@ -80,10 +80,14 @@ class Git:
 
     def changed_paths(self) -> tuple[set[str], set[str]]:
         """(changed, deleted) repo-relative paths vs the working tree."""
-        changed, deleted, _ = self._parse_status_porcelain(
+        changed, deleted, _ = self.working_paths()
+        return changed, deleted
+
+    def working_paths(self) -> tuple[set[str], set[str], set[str]]:
+        """(changed, deleted, untracked) repo-relative paths in the working tree."""
+        return self._parse_status_porcelain(
             self._run(["status", "--porcelain", "-z", "--untracked-files=all"]) or ""
         )
-        return changed, deleted
 
     def changed_since(self, commit: str) -> set[str]:
         """Files that differ between commit and the working tree."""

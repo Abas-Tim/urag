@@ -73,18 +73,51 @@ def _exact_symbol_ids(query: str, lexical: list[tuple[Unit, str, float]]) -> set
         "an",
         "are",
         "at",
+        "call",
+        "calls",
+        "called",
+        "calling",
+        "class",
+        "code",
+        "count",
+        "data",
         "defined",
         "definition",
+        "defines",
+        "do",
+        "does",
+        "error",
+        "file",
+        "files",
         "for",
+        "function",
+        "get",
+        "how",
         "in",
         "is",
+        "list",
+        "method",
+        "name",
+        "new",
         "of",
         "on",
+        "return",
+        "set",
+        "test",
+        "tests",
         "the",
         "to",
+        "type",
+        "user",
+        "users",
+        "value",
         "was",
         "were",
+        "what",
         "where",
+        "which",
+        "work",
+        "works",
     }
     for token in tokens:
         symbol_like = (
@@ -95,14 +128,10 @@ def _exact_symbol_ids(query: str, lexical: list[tuple[Unit, str, float]]) -> set
             or (token[:1].isupper() and any(c.islower() for c in token[1:]))
             or (len(token) > 1 and token.isupper())
         )
-        if not symbol_like and not (
-            definition_query and token.casefold() not in stop_words
-        ):
+        if not symbol_like and not (definition_query and token.casefold() not in stop_words):
             continue
         identifiers.add(token.casefold())
-        identifiers.update(
-            part.casefold() for part in re.split(r"[.:$]+", token) if part
-        )
+        identifiers.update(part.casefold() for part in re.split(r"[.:$]+", token) if part)
 
     if not identifiers:
         return set()
@@ -146,9 +175,7 @@ def fit_evidence(span: str, max_tokens: int) -> str:
 
 
 class Retriever:
-    def __init__(
-        self, cfg: Config, db: Database, embedder: Embedder, git: Git | None = None
-    ):
+    def __init__(self, cfg: Config, db: Database, embedder: Embedder, git: Git | None = None):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
@@ -165,9 +192,7 @@ class Retriever:
         return self._stale_cache[commit]
 
     def _stale_map(self, paths: list[str]) -> dict[str, bool]:
-        root = getattr(
-            getattr(self, "cfg", None), "project_root", self.db.db_path.parent.parent
-        )
+        root = getattr(getattr(self, "cfg", None), "project_root", self.db.db_path.parent.parent)
         stale: dict[str, bool] = {}
         for path in paths:
             row = self.db.conn.execute(
@@ -188,9 +213,7 @@ class Retriever:
             if row["sha256"]:
                 stale[path] = digest != row["sha256"]
             else:
-                stale[path] = bool(
-                    row["commit"] and path in self._changed_since(row["commit"])
-                )
+                stale[path] = bool(row["commit"] and path in self._changed_since(row["commit"]))
         return stale
 
     def search(
@@ -213,14 +236,9 @@ class Retriever:
         if mode == "hybrid":
             target = self._definition_symbol(query)
             if target:
-                hits = self.db.resolve_units(
-                    target, limit=max(k * 4, 20), language=language
-                )
+                hits = self.db.resolve_units(target, limit=max(k * 4, 20), language=language)
                 if hits:
-                    results = [
-                        RetrievedUnit(unit, path, score=1.0)
-                        for unit, path, _commit in hits
-                    ]
+                    results = [RetrievedUnit(unit, path, score=1.0) for unit, path, _commit in hits]
                     results = self._limit_results(results, k)
                     self._enrich(results)
                     return SearchResult(results, "definitions", query, qc, budget)
@@ -252,17 +270,13 @@ class Retriever:
                 )
                 if reference_intent:
                     hits = (
-                        self.db.transitive_references(
-                            target, max_depth=depth, limit=max(k * 3, 10)
-                        )
+                        self.db.transitive_references(target, max_depth=depth, limit=max(k * 3, 10))
                         if depth > 1
                         else self.db.references(target, limit=max(k * 3, 10))
                     )
                 else:
                     hits = (
-                        self.db.transitive_callers(
-                            target, max_depth=depth, limit=max(k * 3, 10)
-                        )
+                        self.db.transitive_callers(target, max_depth=depth, limit=max(k * 3, 10))
                         if depth > 1
                         else self.db.callers(target, limit=max(k * 3, 10))
                     )
@@ -272,9 +286,7 @@ class Retriever:
                             h["unit"],
                             h["path"],
                             score=1.0,
-                            caller_of=h.get("callee_full")
-                            or h.get("ref_full")
-                            or target,
+                            caller_of=h.get("callee_full") or h.get("ref_full") or target,
                             call_line=h["line"],
                             hop=h.get("hop", 0),
                             ref_kind=h.get("kind", ""),
@@ -310,9 +322,7 @@ class Retriever:
                 lists.append([(u.id or 0, s) for u, _p, s in dense])
             except RuntimeError:
                 dense = []
-            fused = _rrf_scores(
-                lists, rc.rrf_k, weights=[rc.lexical_weight, rc.dense_weight]
-            )
+            fused = _rrf_scores(lists, rc.rrf_k, weights=[rc.lexical_weight, rc.dense_weight])
             exact_ids = _exact_symbol_ids(query, lexical)
             exact_bonus = rc.exact_symbol_weight / (rc.rrf_k + 1)
             for uid in exact_ids:
@@ -342,9 +352,7 @@ class Retriever:
         self._enrich(results, stale)
         return SearchResult(results, mode, query, qc, budget)
 
-    def _limit_results(
-        self, results: list[RetrievedUnit], limit: int
-    ) -> list[RetrievedUnit]:
+    def _limit_results(self, results: list[RetrievedUnit], limit: int) -> list[RetrievedUnit]:
         per_file: dict[str, int] = {}
         seen: set[tuple[str, str, str]] = set()
         selected: list[RetrievedUnit] = []
@@ -360,9 +368,7 @@ class Retriever:
                 break
         return selected
 
-    def _enrich(
-        self, results: list[RetrievedUnit], stale: dict[str, bool] | None = None
-    ) -> None:
+    def _enrich(self, results: list[RetrievedUnit], stale: dict[str, bool] | None = None) -> None:
         """Attach commit + staleness to results."""
         stale = stale or self._stale_map([r.file_path for r in results])
         for r in results:
@@ -513,9 +519,7 @@ class Retriever:
         budget = self._impact_budget()
         return SearchResult(results, "calls", f"callers of {name}", "impact", budget)
 
-    def search_transitive(
-        self, name: str, depth: int = 3, limit: int = 20
-    ) -> SearchResult:
+    def search_transitive(self, name: str, depth: int = 3, limit: int = 20) -> SearchResult:
         """Multi-hop call-graph lookup: callers-of-callers up to `depth` hops."""
         hits = self.db.transitive_callers(name, max_depth=depth, limit=limit)
         results = [
@@ -556,9 +560,7 @@ class Retriever:
         ]
         self._enrich(results)
         budget = self._impact_budget()
-        return SearchResult(
-            results, "references", f"references to {name}", "impact", budget
-        )
+        return SearchResult(results, "references", f"references to {name}", "impact", budget)
 
     def search_transitive_references(
         self, name: str, depth: int = 3, limit: int = 30
@@ -587,9 +589,7 @@ class Retriever:
             budget,
         )
 
-    def unreferenced(
-        self, limit: int = 50, language: str | None = None
-    ) -> SearchResult:
+    def unreferenced(self, limit: int = 50, language: str | None = None) -> SearchResult:
         """Candidate dead symbols: no incoming calls and no incoming references."""
         hits = self.db.unreferenced_symbols(limit=limit, language=language)
         results = [
@@ -629,9 +629,7 @@ class Retriever:
             ev["stale"] = self._stale_map([ev["file"]]).get(ev["file"], True)
         return ev
 
-    def get_many(
-        self, unit_ids: list[int], max_tokens: int | None = None
-    ) -> list[dict]:
+    def get_many(self, unit_ids: list[int], max_tokens: int | None = None) -> list[dict]:
         """Batch evidence fetch for multiple unit ids, with optional trimming."""
         out: list[dict] = []
         for unit_id in unit_ids:
@@ -678,11 +676,7 @@ class Retriever:
         )
 
     def children(self, unit_id: int, include_siblings: bool = False) -> SearchResult:
-        units = (
-            self.db.siblings_of(unit_id)
-            if include_siblings
-            else self.db.children_of(unit_id)
-        )
+        units = self.db.siblings_of(unit_id) if include_siblings else self.db.children_of(unit_id)
         results: list[RetrievedUnit] = []
         paths: dict[int, str] = {}
         for u in units:
@@ -702,9 +696,7 @@ class Retriever:
         for r in results:
             r.stale = stale.get(r.file_path, False)
         mode = "siblings" if include_siblings else "children"
-        return SearchResult(
-            results, mode, f"unit {unit_id}", "local", self._nav_budget(2000)
-        )
+        return SearchResult(results, mode, f"unit {unit_id}", "local", self._nav_budget(2000))
 
     def callees(self, unit_id: int) -> dict | None:
         got = self.db.unit_by_id(unit_id)
@@ -753,9 +745,7 @@ class Retriever:
             self._nav_budget(2000),
         )
 
-    def read_file(
-        self, path: str, start: int | None = None, end: int | None = None
-    ) -> dict:
+    def read_file(self, path: str, start: int | None = None, end: int | None = None) -> dict:
         root = self.cfg.project_root
         p = Path(path)
         if not p.is_absolute():

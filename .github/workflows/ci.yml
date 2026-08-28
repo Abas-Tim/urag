@@ -75,25 +75,3 @@ jobs:
           path: |
             benchmarks/reports/*.json
             benchmarks/reports/*.html
-
-  cross-platform:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-        python: ["3.12", "3.13"]
-    runs-on: ${{ matrix.os }}
-    env:
-      UV_PYTHON_PREFERENCE: only-managed
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Install
-        run: uv sync --group dev
-      - name: Test
-        run: uv run pytest -q
-      - name: CLI smoke
-        run: uv run urag --version

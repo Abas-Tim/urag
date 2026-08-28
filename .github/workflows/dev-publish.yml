@@ -2,12 +2,16 @@ name: dev-publish
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "skip the PyPI upload (validation run)"
+        required: false
 
 jobs:
   dev:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, 'chore(release)') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -20,6 +24,8 @@ jobs:
           enable-cache: false
       - name: Derive dev version
         id: ver
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           VER=$(python scripts/dev_version.py | tail -n1)
           echo "version=$VER" >> "$GITHUB_OUTPUT"
@@ -27,9 +33,7 @@ jobs:
         if: ${{ !startsWith(steps.ver.outputs.version, 'SKIP') }}
         run: uv build
       - name: Publish to PyPI
-        if: ${{ !startsWith(steps.ver.outputs.version, 'SKIP') }}
+        if: ${{ !startsWith(steps.ver.outputs.version, 'SKIP') && github.event.inputs.dry_run != 'true' }}
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: uv publish
-      - name: Log published version
-        run: echo "urag-cli pre-release: ${{ steps.ver.outputs.version }}"

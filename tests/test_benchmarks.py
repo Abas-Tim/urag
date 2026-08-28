@@ -1,14 +1,15 @@
 """Tests for the call-graph benchmark suites (transitive + import-alias)."""
 
 import json
-from pathlib import Path
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
 from urag.config import load_config
 from urag.db import Database
+from urag.embed import NoopEmbedder
 from urag.eval import (
     Hit,
     OracleBaseline,
@@ -28,7 +29,6 @@ from urag.eval import (
     transitive_caller_ids,
 )
 from urag.indexer import Indexer
-from urag.embed import NoopEmbedder
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
 

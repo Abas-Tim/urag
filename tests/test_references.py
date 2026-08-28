@@ -7,13 +7,12 @@ import pytest
 from urag.config import load_config
 from urag.db import Database
 from urag.embed import NoopEmbedder
-from urag.indexer import Indexer
-from urag.retrieve import Retriever
 from urag.extractors.native_ext import CSharpExtractor, JavaExtractor
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
 from urag.extractors.xml_ext import XmlExtractor
-
+from urag.indexer import Indexer
+from urag.retrieve import Retriever
 
 # ---------------------------------------------------------------------------
 # reference extraction
@@ -340,8 +339,9 @@ def test_mcp_references_and_dead_symbols(refdb):
 
 
 def test_cli_read_positional_range(tmp_path):
-    import urag.cli as cli
     from typer.testing import CliRunner
+
+    import urag.cli as cli
 
     cfg = load_config(tmp_path)
     cfg.embedding.provider = "none"

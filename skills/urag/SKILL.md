@@ -49,9 +49,9 @@ keeps an existing index updated through debounced filesystem events. A first
 full index can take minutes (local CPU embeddings). If it is interrupted, just
 run `urag index` again — it resumes where it stopped.
 
-Use `--json` for machine-readable search or caller results. Use
-`search --evidence` for trimmed source spans, or `get <unit-id>` for the full
-current source span.
+Use `--json` for machine-readable output from `search`, `callers`,
+`references`, `read`, `status`, and `doctor`. Use `search --evidence` for
+trimmed source spans, or `get <unit-id>` for the full current source span.
 
 ## Search Modes
 
@@ -143,6 +143,11 @@ urag mcp --root <root>
 ```
 
 The server exposes these tools:
+
+> Server tool names are intentionally short. Agent harnesses expose them
+> prefixed with the server name — e.g. `urag_search`, `urag_fetch_unit`,
+> `urag_callers`, `urag_index_now`. Use the prefixed names when calling
+> through a harness; the bare names below are the server-level identifiers.
 
 - `search(query, top_k?, mode?, language?, include_evidence?, query_class?)`
   returns compact packets with metadata, ranks, provenance, and optional

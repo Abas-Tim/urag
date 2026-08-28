@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 from urag.config import load_config
@@ -20,10 +22,7 @@ def test_fresh_index_has_valid_fts_and_exact_path_search(tmp_path: Path):
     cfg, db = _index(tmp_path)
     try:
         assert db.conn.execute("SELECT count(*) FROM fts_units").fetchone()[0] == 1
-        assert (
-            db.lexical_search("validate_token", exact=True)[0][0].name
-            == "validate_token"
-        )
+        assert db.lexical_search("validate_token", exact=True)[0][0].name == "validate_token"
         assert db.lexical_search("auth.py", exact=True)[0][1] == "auth.py"
     finally:
         db.close()
@@ -35,9 +34,7 @@ def test_deleted_files_remove_vectors(tmp_path: Path):
     cfg, db = _index(tmp_path)
     try:
         unit_id = db.conn.execute("SELECT id FROM units LIMIT 1").fetchone()[0]
-        db.store_embeddings(
-            [(unit_id, "python", "symbol", [0.0] * cfg.embedding.dimension)]
-        )
+        db.store_embeddings([(unit_id, "python", "symbol", [0.0] * cfg.embedding.dimension)])
         assert db.stats().embedded == 1
         db.delete_files(["auth.py"])
         assert db.stats().embedded == 0
@@ -58,9 +55,7 @@ def test_same_size_same_mtime_content_change_is_reindexed(tmp_path: Path):
         os.utime(path, (old_stat.st_atime, old_stat.st_mtime))
         stats = Indexer(cfg, db, NoopEmbedder()).index_all()
         assert stats["changed"] == 1
-        unit_id = db.conn.execute(
-            "SELECT id FROM units WHERE name = 'value'"
-        ).fetchone()[0]
+        unit_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
         assert "return 2" in db.load_evidence(unit_id)["span"]
     finally:
         db.close()
@@ -71,14 +66,10 @@ def test_unit_id_is_stable_when_symbol_body_changes(tmp_path: Path):
     path.write_text("def value():\n    return 1\n", encoding="utf-8")
     cfg, db = _index(tmp_path)
     try:
-        first_id = db.conn.execute(
-            "SELECT id FROM units WHERE name = 'value'"
-        ).fetchone()[0]
+        first_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
         path.write_text("def value():\n    return 2\n", encoding="utf-8")
         Indexer(cfg, db, NoopEmbedder()).index_all()
-        second_id = db.conn.execute(
-            "SELECT id FROM units WHERE name = 'value'"
-        ).fetchone()[0]
+        second_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
         assert first_id == second_id
     finally:
         db.close()
@@ -102,51 +93,33 @@ def test_parent_relationships_and_resolved_call_targets(tmp_path: Path):
             ).fetchone()[0]
             == 1
         )
-        class_id = db.conn.execute(
-            "SELECT id FROM units WHERE name = 'Validator'"
-        ).fetchone()[0]
-        parent_id = db.conn.execute(
-            "SELECT parent_id FROM units WHERE name = 'method'"
-        ).fetchone()[0]
+        class_id = db.conn.execute("SELECT id FROM units WHERE name = 'Validator'").fetchone()[0]
+        parent_id = db.conn.execute("SELECT parent_id FROM units WHERE name = 'method'").fetchone()[
+            0
+        ]
         assert parent_id == class_id
     finally:
         db.close()
 
 
 def test_incremental_target_ambiguity_re_resolves_existing_edges(tmp_path: Path):
-    (tmp_path / "target.py").write_text(
-        "def target():\n    return True\n", encoding="utf-8"
-    )
-    (tmp_path / "app.py").write_text(
-        "def caller():\n    return target()\n", encoding="utf-8"
-    )
+    (tmp_path / "target.py").write_text("def target():\n    return True\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("def caller():\n    return target()\n", encoding="utf-8")
     cfg, db = _index(tmp_path)
     try:
-        assert (
-            db.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0]
-            is not None
-        )
-        (tmp_path / "other.py").write_text(
-            "def target():\n    return False\n", encoding="utf-8"
-        )
+        assert db.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0] is not None
+        (tmp_path / "other.py").write_text("def target():\n    return False\n", encoding="utf-8")
 
         Indexer(cfg, db, NoopEmbedder()).index_all()
 
-        assert (
-            db.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0]
-            is None
-        )
+        assert db.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0] is None
     finally:
         db.close()
 
 
 def test_reopening_index_clears_dangling_call_targets(tmp_path: Path):
-    (tmp_path / "target.py").write_text(
-        "def target():\n    return True\n", encoding="utf-8"
-    )
-    (tmp_path / "app.py").write_text(
-        "def caller():\n    return target()\n", encoding="utf-8"
-    )
+    (tmp_path / "target.py").write_text("def target():\n    return True\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("def caller():\n    return target()\n", encoding="utf-8")
     cfg, db = _index(tmp_path)
     edge = db.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()
     assert edge[0] is not None
@@ -156,12 +129,9 @@ def test_reopening_index_clears_dangling_call_targets(tmp_path: Path):
     db.conn.commit()
     db.close()
 
-    reopened = Database(cfg.db_path, cfg.embedding.dimension)
+    reopened = Database(cfg.db_path, cfg.embedding.dimension, migrate=True)
     try:
-        assert (
-            reopened.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0]
-            is None
-        )
+        assert reopened.conn.execute("SELECT callee_unit_id FROM call_edges").fetchone()[0] is None
     finally:
         reopened.close()
 
@@ -178,5 +148,49 @@ def test_alias_bindings_are_removed_on_reindex(tmp_path: Path):
         path.write_text("def check(path):\n    return exists(path)\n", encoding="utf-8")
         Indexer(cfg, db, NoopEmbedder()).index_all()
         assert db.conn.execute("SELECT count(*) FROM import_aliases").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def _git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(root), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(root), check=True)
+
+
+def test_git_clean_file_skips_rehash(tmp_path: Path, monkeypatch):
+    _git_repo(tmp_path)
+    (tmp_path / "a.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
+    cfg, db = _index(tmp_path)
+    try:
+        import hashlib as _hashlib
+
+        def boom(data, *args, **kwargs):
+            raise AssertionError("rehash should be skipped for git-clean files")
+
+        monkeypatch.setattr(_hashlib, "sha256", boom)
+        stats = Indexer(cfg, db, NoopEmbedder()).index_all()
+        assert stats["changed"] == 0
+    finally:
+        db.close()
+
+
+def test_git_modified_same_mtime_is_reindexed(tmp_path: Path):
+    _git_repo(tmp_path)
+    path = tmp_path / "a.py"
+    path.write_text("def value():\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
+    cfg, db = _index(tmp_path)
+    try:
+        old_stat = path.stat()
+        path.write_text("def value():\n    return 2\n", encoding="utf-8")
+        os.utime(path, (old_stat.st_atime, old_stat.st_mtime))
+        stats = Indexer(cfg, db, NoopEmbedder()).index_all()
+        assert stats["changed"] == 1
+        unit_id = db.conn.execute("SELECT id FROM units WHERE name = 'value'").fetchone()[0]
+        assert "return 2" in db.load_evidence(unit_id)["span"]
     finally:
         db.close()

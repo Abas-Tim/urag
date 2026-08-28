@@ -48,6 +48,8 @@ jobs:
         run: uv sync --group dev
       - name: Test
         run: uv run pytest -q
+      - name: Lint
+        run: uv run ruff check src tests
       - name: CLI smoke
         run: uv run urag --version
 

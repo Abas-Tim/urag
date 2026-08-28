@@ -7,8 +7,6 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import CHUNK_TYPES, SYMBOL_TYPES
-
 UURAG_DIR = ".urag"
 CONFIG_NAME = "urag.toml"
 DB_NAME = "index.db"
@@ -150,6 +148,7 @@ class Config:
             f"http_url = {self.embedding.http_url!r}",
             f"http_api_key = {self.embedding.http_api_key!r}",
             f"http_model = {self.embedding.http_model!r}",
+            f"http_timeout = {self.embedding.http_timeout}",
             "",
             "[index]",
             f"languages = {self.index.languages!r}",
@@ -220,12 +219,12 @@ def _parse_toml(path: Path, cfg: Config) -> None:
                 setattr(cfg.retrieval, k, ret[k])
 
 
-def load_config(project_root: Path) -> Config:
+def load_config(project_root: Path, create: bool = False) -> Config:
     cfg = default_config(project_root)
     cfg_path = cfg.config_path
     if cfg_path.exists():
         _parse_toml(cfg_path, cfg)
-    else:
+    elif create:
         cfg.save()
     return cfg
 

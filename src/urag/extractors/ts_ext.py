@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from tree_sitter import Language, Node, Parser
-import tree_sitter_typescript as tsts
 import tree_sitter_javascript as tsjs
+import tree_sitter_typescript as tsts
+from tree_sitter import Language, Node, Parser
 
-from ..models import Unit, UNIT_KIND_SYMBOL
+from ..models import UNIT_KIND_SYMBOL, Unit
 from .base import (
     ByteIndexedSource,
     Extractor,
-    MAX_SUMMARY_CHARS,
     collapse_ws,
     dedupe_refs,
     leading_comments,
@@ -325,7 +324,7 @@ class TsExtractor(Extractor):
                                 units.append(
                                     self._func(member, source, lines, qualname)
                                 )
-            elif t in ("import_statement", "import_from_statement"):
+            elif t == "import_statement":
                 units.append(self._import(child, source))
             elif t == "export_statement":
                 decl = child.named_children[-1] if child.named_children else None
@@ -351,7 +350,6 @@ class TsExtractor(Extractor):
         doc = leading_comments(lines, sl, marker="//") or leading_comments(
             lines, sl, marker="/*"
         )
-        params = n.child_by_field_name("parameters")
         concepts = self._identifiers(n, source, 12)
         qualname = f"{prefix}.{name}" if prefix else name
         return Unit(

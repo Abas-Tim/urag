@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from ..models import Unit, UNIT_KIND_CHUNK
-from .base import Extractor, MAX_SUMMARY_CHARS, collapse_ws
+from ..models import UNIT_KIND_CHUNK, Unit
+from .base import MAX_SUMMARY_CHARS, Extractor, collapse_ws
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 MAX_CHUNK_LINES = 150
@@ -34,9 +34,7 @@ class MarkdownExtractor(Extractor):
                 title = m.group(2).strip()
                 headings.append((i, level, title, "#" * level + " " + title))
         if not headings:
-            return self._chunk(
-                lines, offsets, 0, len(lines), f"#{rel_path}", "", rel_path
-            )
+            return self._chunk(lines, offsets, 0, len(lines), f"#{rel_path}", "", rel_path)
         units: list[Unit] = []
         if headings[0][0] > 0:
             units.extend(
@@ -50,7 +48,7 @@ class MarkdownExtractor(Extractor):
                     rel_path,
                 )
             )
-        for idx, (line_no, level, title, full) in enumerate(headings):
+        for idx, (line_no, _level, title, full) in enumerate(headings):
             end = headings[idx + 1][0] if idx + 1 < len(headings) else len(lines)
             chunks = self._chunk(
                 lines, offsets, line_no, end, f"#{rel_path}#{title}", full, rel_path
@@ -99,7 +97,6 @@ class MarkdownExtractor(Extractor):
         body: list[str],
         rel_path: str,
     ) -> Unit:
-        content = "\n".join(body).strip()
         summary = " ".join(s.strip() for s in body if s.strip())[:MAX_SUMMARY_CHARS]
         return Unit(
             file_id=0,

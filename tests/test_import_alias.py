@@ -7,17 +7,17 @@ import pytest
 from urag.config import load_config
 from urag.db import Database
 from urag.embed import NoopEmbedder
-from urag.indexer import Indexer
-from urag.retrieve import Retriever
+from urag.extractors.native_ext import (
+    CExtractor,
+    CSharpExtractor,
+    GoExtractor,
+    JavaExtractor,
+    RustExtractor,
+)
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
-from urag.extractors.native_ext import (
-    GoExtractor,
-    RustExtractor,
-    CSharpExtractor,
-    CExtractor,
-    JavaExtractor,
-)
+from urag.indexer import Indexer
+from urag.retrieve import Retriever
 
 
 def _aliases(ext, src):

@@ -175,3 +175,10 @@ def test_evidence_fits_character_budget():
     fitted = fit_evidence(span, 20)
     assert len(fitted.splitlines()[0]) <= 40
     assert "full span via urag get" in fitted
+
+
+def test_definition_common_words_are_not_exact_identifiers():
+    from urag.retrieve import _exact_symbol_ids
+
+    assert _exact_symbol_ids("where is the user count defined", []) == set()
+    assert _exact_symbol_ids("where is value defined", []) == set()

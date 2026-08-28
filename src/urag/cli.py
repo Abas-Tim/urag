@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
-import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -24,10 +25,10 @@ except Exception:
 from .config import (
     UURAG_DIR,
     Config,
+    default_model_cache_dir,
     discover_project_root,
     ensure_gitignore,
     load_config,
-    default_model_cache_dir,
 )
 from .db import Database
 from .embed import Embedder, NoopEmbedder, create_embedder, purge_model_cache
@@ -62,10 +63,8 @@ def _flush_progress(msg: str) -> None:
     """Print an index progress line and flush it immediately so agent
     harnesses see output while long runs are still going."""
     console.print(msg)
-    try:
+    with contextlib.suppress(Exception):
         sys.stdout.flush()
-    except Exception:
-        pass
 
 
 _XML_FAMILY_EXTS = (".xaml", ".axaml", ".xml", ".csproj", ".props", ".targets")
@@ -74,8 +73,6 @@ _XML_FAMILY_EXTS = (".xaml", ".axaml", ".xml", ".csproj", ".props", ".targets")
 def _find_xml_family_files(cfg: Config, cap: int = 1000) -> int:
     """Count XML-family files under the project root, pruning excluded and
     hidden directories. Cheap existence check for the doctor hint."""
-    import os
-
     skip = {
         ".git",
         ".hg",
@@ -92,7 +89,7 @@ def _find_xml_family_files(cfg: Config, cap: int = 1000) -> int:
         "__pycache__",
     }
     found = 0
-    for dirpath, dirnames, filenames in os.walk(cfg.project_root):
+    for _dirpath, dirnames, filenames in os.walk(cfg.project_root):
         dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
         for name in filenames:
             if name.lower().endswith(_XML_FAMILY_EXTS):
@@ -122,27 +119,26 @@ def _embedder(cfg: Config) -> Embedder:
     return emb
 
 
-def _engine(root: Path | None = None) -> tuple[Config, Database]:
+def _engine(root: Path | None = None, migrate: bool = False) -> tuple[Config, Database]:
     root = root or discover_project_root()
     cfg = load_config(root)
     if not cfg.db_path.exists():
-        raise typer.BadParameter(
-            f"no index found in {cfg.project_root}. Run: urag init"
-        )
-    return cfg, Database(cfg.db_path, cfg.embedding.dimension)
+        raise typer.BadParameter(f"no index found in {cfg.project_root}. Run: urag init")
+    try:
+        return cfg, Database(cfg.db_path, cfg.embedding.dimension, migrate=migrate)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
 def init(
     root: Path = typer.Option(".", help="project root to index"),
     full: bool = typer.Option(False, "--full", help="also run a full index"),
-    no_embed: bool = typer.Option(
-        False, "--no-embed", help="skip model download / embedding"
-    ),
+    no_embed: bool = typer.Option(False, "--no-embed", help="skip model download / embedding"),
 ):
     """Set up .urag/ config and initial index for a project."""
     root = root.resolve()
-    cfg = load_config(root)
+    cfg = load_config(root, create=True)
     if not cfg.urag_dir.exists():
         cfg.urag_dir.mkdir(parents=True, exist_ok=True)
     gi = root / ".gitignore"
@@ -152,7 +148,7 @@ def init(
             console.print(f"[green]added {UURAG_DIR}/ to {gi}[/green]")
         else:
             console.print(f"[green]created {gi} with {UURAG_DIR}/ entry[/green]")
-    db = Database(cfg.db_path, cfg.embedding.dimension)
+    db = Database(cfg.db_path, cfg.embedding.dimension, migrate=True)
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")
     if full:
@@ -180,18 +176,12 @@ def _detect_local_dimension(model: str) -> int | None:
 @app.command()
 def embed(
     root: Path = typer.Option(".", help="project root"),
-    model: Optional[str] = typer.Option(
-        None, "--model", help="embedding model (local provider)"
-    ),
-    provider: Optional[str] = typer.Option(
-        None, "--provider", help="local | http | none"
-    ),
+    model: Optional[str] = typer.Option(None, "--model", help="embedding model (local provider)"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="local | http | none"),
     dimension: Optional[int] = typer.Option(
         None, "--dimension", help="vector dimension (auto-detected for local models)"
     ),
-    reindex: bool = typer.Option(
-        False, "--reindex", help="re-embed all units after switching"
-    ),
+    reindex: bool = typer.Option(False, "--reindex", help="re-embed all units after switching"),
     keep_cache: bool = typer.Option(
         False, "--keep-cache", help="keep the old model's files in the local cache"
     ),
@@ -209,18 +199,20 @@ def embed(
         if emb.provider == "local":
             console.print(f"  cache:     {default_model_cache_dir()}")
         if cfg.db_path.exists():
-            db = Database(cfg.db_path, emb.dimension)
-            s = db.stats()
-            db.close()
-            console.print(f"  embedded:  {s.embedded}/{s.units} units")
+            try:
+                db = Database(cfg.db_path, emb.dimension)
+            except RuntimeError as exc:
+                console.print(f"  [yellow]index: {exc}[/yellow]")
+            else:
+                s = db.stats()
+                db.close()
+                console.print(f"  embedded:  {s.embedded}/{s.units} units")
         return
 
     old_provider, old_model, old_dim = emb.provider, emb.model, emb.dimension
     new_provider = provider or old_provider
     if new_provider not in ("local", "http", "none"):
-        raise typer.BadParameter(
-            f"provider must be local, http, or none (got {new_provider!r})"
-        )
+        raise typer.BadParameter(f"provider must be local, http, or none (got {new_provider!r})")
     new_model = model or old_model
 
     if new_provider == "local":
@@ -234,8 +226,7 @@ def embed(
         else:
             if dimension is not None and dimension != detected:
                 raise typer.BadParameter(
-                    f"{new_model!r} produces {detected}-dimensional vectors, "
-                    f"not {dimension}"
+                    f"{new_model!r} produces {detected}-dimensional vectors, not {dimension}"
                 )
             new_dim = detected
     elif new_provider == "http":
@@ -245,9 +236,7 @@ def embed(
     else:
         new_dim = old_dim
 
-    changed = (
-        new_provider != old_provider or new_model != old_model or new_dim != old_dim
-    )
+    changed = new_provider != old_provider or new_model != old_model or new_dim != old_dim
 
     if changed and cfg.db_path.exists():
         db = Database(cfg.db_path, old_dim if old_dim > 0 else new_dim)
@@ -261,10 +250,20 @@ def embed(
         and (new_provider != "local" or new_model != old_model)
         and not keep_cache
     ):
+        if new_provider == "local":
+            try:
+                create_embedder(
+                    replace(
+                        cfg.embedding,
+                        provider=new_provider,
+                        model=new_model,
+                        dimension=new_dim,
+                    )
+                )
+            except Exception as exc:
+                raise typer.BadParameter(f"new model {new_model!r} failed to load: {exc}") from exc
         if purge_model_cache(old_model):
-            console.print(
-                f"[yellow]removed {old_model} from the local model cache[/yellow]"
-            )
+            console.print(f"[yellow]removed {old_model} from the local model cache[/yellow]")
 
     emb.provider = new_provider
     emb.model = new_model
@@ -274,16 +273,12 @@ def embed(
     if not changed:
         console.print("[green]embedding config unchanged[/green]")
     else:
-        console.print(
-            f"[green]switched to {new_provider}:{new_model} ({new_dim}d)[/green]"
-        )
+        console.print(f"[green]switched to {new_provider}:{new_model} ({new_dim}d)[/green]")
         if not reindex and new_provider != "none" and cfg.db_path.exists():
-            console.print(
-                "[yellow]run `urag index` to re-embed units with the new model[/yellow]"
-            )
+            console.print("[yellow]run `urag index` to re-embed units with the new model[/yellow]")
 
     if reindex and new_provider != "none" and cfg.db_path.exists():
-        db = Database(cfg.db_path, new_dim)
+        db = Database(cfg.db_path, new_dim, migrate=True)
         indexer = Indexer(cfg, db, _embedder(cfg), progress=lambda m: console.print(m))
         indexer.index_all()
         db.close()
@@ -295,7 +290,7 @@ def index(
     no_embed: bool = typer.Option(False, "--no-embed", help="skip embedding new units"),
 ):
     """Incrementally index changed files (full pass on first run)."""
-    cfg, db = _engine(root)
+    cfg, db = _engine(root, migrate=True)
     embedder = NoopEmbedder() if no_embed else _embedder(cfg)
     indexer = Indexer(cfg, db, embedder, progress=_flush_progress)
     _flush_progress(f"[dim]indexing {cfg.project_root}...[/dim]")
@@ -311,7 +306,7 @@ def watch(
     ),
 ):
     """Continuously re-index on file changes."""
-    cfg, db = _engine(root)
+    cfg, db = _engine(root, migrate=True)
     indexer = Indexer(cfg, db, _embedder(cfg), progress=_flush_progress)
     run_watch(cfg, indexer, rescan_minutes=rescan_minutes)
     db.close()
@@ -323,9 +318,7 @@ def search(
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
     mode: str = typer.Option("hybrid", "--mode", help="hybrid | lexical | dense"),
-    language: Optional[str] = typer.Option(
-        None, "--language", help="filter by language"
-    ),
+    language: Optional[str] = typer.Option(None, "--language", help="filter by language"),
     evidence: bool = typer.Option(False, "--evidence", help="include L2 source spans"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
@@ -360,9 +353,7 @@ def search(
         for r in result.results:
             u = r.unit
             loc = f"{r.file_path}:{u.start_line}-{u.end_line}"
-            head = (
-                f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{loc}[/dim]"
-            )
+            head = f"[bold]{u.qualname or u.name}[/bold] ({u.unit_type}) [dim]{loc}[/dim]"
             if r.stale:
                 head += " [red][stale][/red]"
             console.print(head)
@@ -380,9 +371,7 @@ def search(
             if badges:
                 console.print(f"  [dim]{' '.join(badges)} · score {r.score:.3f}[/dim]")
             if r.caller_of:
-                console.print(
-                    f"  [green]calls {r.caller_of} at line {r.call_line}[/green]"
-                )
+                console.print(f"  [green]calls {r.caller_of} at line {r.call_line}[/green]")
             if evidence:
                 from .retrieve import fit_evidence
 
@@ -431,9 +420,7 @@ def eval_cmd(
     judge_url: Optional[str] = typer.Option(
         None, "--judge-url", help="OpenAI-compatible chat endpoint for the judge tier"
     ),
-    judge_model: Optional[str] = typer.Option(
-        None, "--judge-model", help="judge model name"
-    ),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="judge model name"),
     judge_key: Optional[str] = typer.Option(
         None, "--judge-key", help="judge API key (prefer URAG_JUDGE_KEY)"
     ),
@@ -449,242 +436,29 @@ def eval_cmd(
     ),
 ):
     """Compare urag retrieval vs grep / chunk-RAG / whole-file baselines."""
-    from .eval import (
-        EVAL_SCHEMA_VERSION,
-        ChunkBaseline,
-        Hit,
-        OracleBaseline,
-        ReadBaseline,
-        RgBaseline,
-        SystemRun,
-        _metrics,
-        _tokens,
-        _unit_tokens,
-        aggregate,
-        autogen_alias_questions,
-        autogen_questions,
-        autogen_reference_questions,
-        autogen_transitive_questions,
-        judge_results,
-        load_questions,
-        reresolve_questions,
-        resolve_question,
-    )
-    from .git_aware import Git
+    from .eval import run_eval
 
     cfg, db = _engine(root)
-    embedder = _embedder(cfg)
     try:
-        if questions:
-            qs = load_questions(questions)
-            if reresolve:
-                before = len(qs)
-                qs = reresolve_questions(db, qs)
-                console.print(
-                    f"[dim]reresolved {len(qs)}/{before} questions against the current index[/dim]"
-                )
-        elif autogen:
-            qs = autogen_questions(db, autogen)
-        else:
-            qs = autogen_questions(db, 10)
-        if transitive:
-            qs += autogen_transitive_questions(db, transitive)
-        if alias:
-            qs += autogen_alias_questions(db, cfg.project_root, alias)
-        if reference:
-            qs += autogen_reference_questions(db, reference)
-        qs = [resolve_question(db, q) for q in qs]
-
-        chosen = (systems or "urag-auto,urag-hybrid,urag-lexical,rg,chunk").split(",")
-        retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
-        rg = RgBaseline(cfg.project_root)
-        read = ReadBaseline(cfg.project_root) if "read" in chosen else None
-        chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
-        oracle = OracleBaseline(cfg.project_root)
-
-        if any(name in chosen for name in ("urag-auto", "urag-hybrid", "urag-lexical")):
-            retriever.search("__warmup__", top_k=top_k)
-
-        def urag_run(result) -> SystemRun:
-            hits = []
-            total = 0
-            for x in result.results:
-                ev = db.load_evidence(x.unit.id)
-                span = (ev or {}).get("span", "")
-                toks = _tokens(span) if span else _unit_tokens(x.unit)
-                hits.append(
-                    Hit(
-                        x.file_path,
-                        x.unit.id,
-                        toks,
-                        detail=span,
-                        title=(x.unit.signature or x.unit.name),
-                    )
-                )
-                total += toks
-            return SystemRun(result.mode, hits, 0.0, total)
-
-        rows: dict[str, list] = {s: [None] * len(qs) for s in chosen}
-        runs_by_system: dict[str, dict[int, SystemRun]] = {}
-        console.print(
-            f"[dim]evaluating {len(qs)} questions (top_k={top_k}) across {len(chosen)} systems[/dim]"
+        run_eval(
+            cfg,
+            db,
+            _embedder(cfg),
+            questions=questions,
+            autogen=autogen,
+            transitive=transitive,
+            alias=alias,
+            reference=reference,
+            top_k=top_k,
+            systems=systems,
+            judge_url=judge_url,
+            judge_model=judge_model,
+            judge_key=judge_key,
+            json_out=json_out,
+            report=report,
+            reresolve=reresolve,
+            console=console,
         )
-
-        def safe_run(name: str, fn) -> SystemRun:
-            t = time.perf_counter()
-            try:
-                run = fn()
-            except Exception as exc:  # one failing system must not kill the eval
-                console.print(f"[yellow]{name}: query failed: {exc}[/yellow]")
-                return SystemRun(name, [], 0.0, 0)
-            if run.seconds == 0.0:
-                run.seconds = time.perf_counter() - t
-            return run
-
-        for i, q in enumerate(qs):
-            runs: dict[str, SystemRun] = {}
-            if "urag-auto" in chosen:
-                runs["urag-auto"] = safe_run(
-                    "urag-auto",
-                    lambda: urag_run(retriever.search(q.query, top_k=top_k)),
-                )
-            if "urag-hybrid" in chosen:
-                runs["urag-hybrid"] = safe_run(
-                    "urag-hybrid",
-                    lambda: urag_run(
-                        retriever.search(q.query, top_k=top_k, query_class="local")
-                    ),
-                )
-            if "urag-lexical" in chosen:
-                runs["urag-lexical"] = safe_run(
-                    "urag-lexical",
-                    lambda: urag_run(
-                        retriever.search(q.query, top_k=top_k, mode="lexical")
-                    ),
-                )
-            if "rg" in chosen:
-                runs["rg"] = safe_run("rg", lambda: rg.search(q.query, top_k, db))
-            if read is not None:
-                runs["read"] = safe_run("read", lambda: read.search(q.query, top_k, db))
-            if chunk is not None:
-                runs["chunk"] = safe_run(
-                    "chunk", lambda: chunk.search(q.query, top_k, db)
-                )
-            if (
-                q.target
-                and q.label != "reference"
-                and ("urag-callers" in chosen or "urag-transitive" in chosen)
-            ):
-                if "urag-callers" in chosen:
-                    runs["urag-callers"] = safe_run(
-                        "urag-callers",
-                        lambda: urag_run(
-                            retriever.search_callers(q.target, limit=top_k)
-                        ),
-                    )
-                if "urag-transitive" in chosen:
-                    runs["urag-transitive"] = safe_run(
-                        "urag-transitive",
-                        lambda: urag_run(
-                            retriever.search_transitive(
-                                q.target, depth=q.depth or 3, limit=top_k
-                            )
-                        ),
-                    )
-            if q.label == "reference" and "urag-references" in chosen:
-                runs["urag-references"] = safe_run(
-                    "urag-references",
-                    lambda: urag_run(
-                        retriever.search_references(q.target, limit=top_k)
-                    ),
-                )
-            if "oracle" in chosen:
-                runs["oracle"] = safe_run("oracle", lambda: oracle.search(q, db))
-            for name, run in runs.items():
-                runs_by_system.setdefault(name, {})[i] = run
-                rows[name][i] = _metrics(run, q, top_k)
-
-        agg = {name: aggregate(v) for name, v in rows.items()}
-        labels = sorted({q.label for q in qs})
-        by_label = {
-            name: {
-                label: aggregate(
-                    [row for q, row in zip(qs, system_rows) if q.label == label]
-                )
-                for label in labels
-            }
-            for name, system_rows in rows.items()
-        }
-        if json_out or report:
-            from . import __version__
-
-            payload = {
-                "schema_version": EVAL_SCHEMA_VERSION,
-                "urag_version": __version__,
-                "root": str(cfg.project_root.resolve()),
-                "top_k": top_k,
-                "questions": [q.to_dict() for q in qs],
-                "systems": {name: agg.get(name, {}) for name in chosen},
-                "by_label": by_label,
-                "per_query": rows,
-                "hits": {
-                    name: [
-                        [
-                            h.to_dict()
-                            for h in (
-                                runs_by_system.get(name, {}).get(i)
-                                or SystemRun(name, [], 0.0, 0)
-                            ).hits
-                        ]
-                        for i in range(len(qs))
-                    ]
-                    for name in chosen
-                },
-            }
-            if chunk is not None:
-                payload["chunk_load_seconds"] = chunk.load_seconds
-            text = json.dumps(payload, ensure_ascii=False, indent=2)
-            if json_out:
-                print(text)
-            if report:
-                report.write_text(text, encoding="utf-8")
-        if not json_out:
-            t = Table(
-                title=f"urag eval — {cfg.project_root} ({len(qs)} questions, top_k={top_k})"
-            )
-            t.add_column("system")
-            t.add_column("recall@k")
-            t.add_column("mrr")
-            t.add_column("tokens/run")
-            t.add_column("p50(s)")
-            t.add_column("p95(s)")
-            for name in chosen:
-                a = agg.get(name, {})
-                t.add_row(
-                    name,
-                    f"{a.get('unit_recall', 0):.2f}",
-                    f"{a.get('mrr', 0):.2f}",
-                    f"{a.get('mean_tokens', 0):.0f}",
-                    f"{a.get('p50_sec', 0) * 1000:.0f}ms",
-                    f"{a.get('p95_sec', 0) * 1000:.0f}ms",
-                )
-            console.print(t)
-
-        if judge_url:
-            console.print("[dim]running LLM judge tier...[/dim]")
-            scores = judge_results(
-                qs,
-                runs_by_system,
-                db,
-                cfg,
-                judge_url,
-                judge_model or "gpt-4o-mini",
-                judge_key or os.environ.get("URAG_JUDGE_KEY", ""),
-                progress=lambda m: console.print(m),
-            )
-            console.print("[bold]answer quality (correct 0-10):[/bold]")
-            for name in chosen:
-                console.print(f"  {name}: {scores.get(name, float('nan')):.2f}")
     finally:
         db.close()
 
@@ -752,9 +526,7 @@ def references(
     try:
         retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
         if depth > 1:
-            result = retriever.search_transitive_references(
-                name, depth=depth, limit=top_k or 30
-            )
+            result = retriever.search_transitive_references(name, depth=depth, limit=top_k or 30)
         else:
             result = retriever.search_references(name, limit=top_k or 30)
         if json_out:
@@ -783,9 +555,7 @@ def references(
 def deadcode(
     root: Path = typer.Option(".", help="project root"),
     top_k: Optional[int] = typer.Option(None, "--top-k"),
-    language: Optional[str] = typer.Option(
-        None, "--language", help="filter by language"
-    ),
+    language: Optional[str] = typer.Option(None, "--language", help="filter by language"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
     """List candidate dead symbols (no incoming calls or references)."""
@@ -802,9 +572,7 @@ def deadcode(
         if not result.results:
             console.print("[green]no unreferenced symbols found[/green]")
             return
-        console.print(
-            "[dim]heuristic candidates only — verify with git grep before removing[/dim]"
-        )
+        console.print("[dim]heuristic candidates only — verify with git grep before removing[/dim]")
         for r in result.results:
             u = r.unit
             console.print(
@@ -917,9 +685,7 @@ def callees(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).callees(
-            unit_id
-        )
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).callees(unit_id)
         if result is None:
             error_console.print("[yellow]unit not found[/yellow]")
             raise typer.Exit(1)
@@ -980,9 +746,7 @@ def symbols_cmd(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).list_symbols(
-            file
-        )
+        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).list_symbols(file)
         if json_out:
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return
@@ -1010,10 +774,9 @@ def read_cmd(
     end: Optional[int] = typer.Argument(
         None, help="last line (inclusive); also available as --end"
     ),
-    start_opt: Optional[int] = typer.Option(
-        None, "--start", help="first line (1-based)"
-    ),
+    start_opt: Optional[int] = typer.Option(None, "--start", help="first line (1-based)"),
     end_opt: Optional[int] = typer.Option(None, "--end", help="last line (inclusive)"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
     """Read a file (or a line range) from the project."""
     from .git_aware import Git
@@ -1025,6 +788,11 @@ def read_cmd(
             start=start_opt if start_opt is not None else start,
             end=end_opt if end_opt is not None else end,
         )
+        if json_out:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if "error" in result:
+                raise typer.Exit(1)
+            return
         if "error" in result:
             error_console.print(f"[yellow]{result['error']}[/yellow]")
             raise typer.Exit(1)
@@ -1072,11 +840,31 @@ def recent_cmd(
 
 
 @app.command()
-def status(root: Path = typer.Option(".", help="project root")):
+def status(
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
     """Show index stats."""
     cfg, db = _engine(root)
     s = db.stats()
     db.close()
+    if json_out:
+        payload = {
+            "root": str(cfg.project_root.resolve()),
+            "files": s.files,
+            "units": s.units,
+            "embedded": s.embedded,
+            "db_size_kib": round(s.size_bytes / 1024),
+            "last_indexed": s.last_indexed,
+            "embedding": {
+                "provider": cfg.embedding.provider,
+                "model": cfg.embedding.model,
+                "dimension": cfg.embedding.dimension,
+            },
+            "by_language": s.by_language,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
     t = Table(title=f"urag index — {cfg.project_root}")
     t.add_column("metric")
     t.add_column("value")
@@ -1093,33 +881,64 @@ def status(root: Path = typer.Option(".", help="project root")):
 
 
 @app.command()
-def doctor(root: Path = typer.Option(".", help="project root")):
+def doctor(
+    root: Path = typer.Option(".", help="project root"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+):
     """Check the installation and index health."""
     cfg, db = _engine(root)
     ok = True
     db.close()
-    console.print(f"[bold]project:[/bold] {cfg.project_root}")
-    console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    hints: list[str] = []
     if "xml" not in cfg.index.languages:
         xml_hits = _find_xml_family_files(cfg)
         if xml_hits:
-            console.print(
-                f"[yellow]hint: {xml_hits} XML-family file(s) found but 'xml' is not in "
+            hint = (
+                f"{xml_hits} XML-family file(s) found but 'xml' is not in "
                 "index.languages (config predates XAML support); add it to "
-                ".urag/urag.toml and re-run `urag index` to close the markup blind spot[/yellow]"
+                ".urag/urag.toml and re-run `urag index` to close the markup blind spot"
             )
+            hints.append(hint)
+    embedding: dict = {"provider": cfg.embedding.provider}
     if cfg.embedding.provider == "local":
         cache = default_model_cache_dir()
-        console.print(f"[bold]model cache:[/bold] {cache}")
+        embedding["model"] = cfg.embedding.model
+        embedding["cache"] = str(cache)
         try:
             emb = create_embedder(cfg.embedding)
             emb.embed_query("probe")
-            console.print(
-                f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({emb.dimension}d)"
-            )
+            embedding["status"] = "ok"
+            embedding["dimension"] = emb.dimension
         except Exception as exc:
             ok = False
-            console.print(f"[bold]embedding:[/bold] [red]FAILED — {exc}[/red]")
+            embedding["status"] = "failed"
+            embedding["error"] = str(exc)
+    if json_out:
+        payload = {
+            "ok": ok,
+            "root": str(cfg.project_root.resolve()),
+            "index": str(cfg.db_path),
+            "embedding": embedding,
+            "hints": hints,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if not ok:
+            raise typer.Exit(1)
+        return
+    console.print(f"[bold]project:[/bold] {cfg.project_root}")
+    console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    for hint in hints:
+        console.print(f"[yellow]hint: {hint}[/yellow]")
+    if cfg.embedding.provider == "local":
+        console.print(f"[bold]model cache:[/bold] {embedding.get('cache', '')}")
+        if embedding.get("status") == "ok":
+            console.print(
+                f"[bold]embedding:[/bold] {cfg.embedding.model} [green]OK[/green] ({embedding['dimension']}d)"
+            )
+        else:
+            console.print(
+                f"[bold]embedding:[/bold] [red]FAILED — {embedding.get('error', '')}[/red]"
+            )
     else:
         console.print(f"[bold]embedding:[/bold] {cfg.embedding.provider}")
     if not ok:

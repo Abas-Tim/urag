@@ -10,18 +10,17 @@ from urag.embed import NoopEmbedder
 from urag.eval import (
     Hit,
     OracleBaseline,
-    RgBaseline,
     Question,
+    RgBaseline,
     SystemRun,
+    _metrics,
     aggregate,
     autogen_questions,
-    scan_import_aliases,
-    _metrics,
-    _unit_tokens,
     judge_results,
     load_questions,
     reresolve_questions,
     resolve_question,
+    scan_import_aliases,
 )
 from urag.indexer import Indexer
 

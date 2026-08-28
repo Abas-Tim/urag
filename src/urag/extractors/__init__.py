@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from .base import Extractor
-from .python_ext import PythonExtractor
-from .ts_ext import TsExtractor
-from .markdown_ext import MarkdownExtractor
 from .config_ext import ConfigExtractor
-from .xml_ext import XmlExtractor
+from .markdown_ext import MarkdownExtractor
 from .native_ext import (
-    GoExtractor,
-    RustExtractor,
-    JavaExtractor,
     CExtractor,
     CSharpExtractor,
+    GoExtractor,
+    JavaExtractor,
+    RustExtractor,
 )
+from .python_ext import PythonExtractor
+from .ts_ext import TsExtractor
+from .xml_ext import XmlExtractor
 
 _REGISTRY: dict[str, Extractor] = {
     "python": PythonExtractor(),

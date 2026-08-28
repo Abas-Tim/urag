@@ -163,9 +163,10 @@ Search supports three modes:
 | `dense` | Conceptual or natural-language questions |
 | `hybrid` | The default; combines lexical and dense results with RRF |
 
-Use `--json` for machine-readable output, `--language` to filter results, and
-`--evidence` to include trimmed source spans. The `get` command returns the
-full current span for a unit id.
+Use `--json` for machine-readable output (search, callers, references,
+resolve, symbols, read, status, doctor, recent), `--language` to filter
+results, and `--evidence` to include trimmed source spans. The `get` command
+returns the full current span for a unit id.
 
 ## Adaptive Retrieval
 

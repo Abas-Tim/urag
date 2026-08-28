@@ -13,7 +13,9 @@ from pathlib import Path
 
 import sqlite_vec
 
-from .models import IndexStats, SourceFile, Unit, RetrievedUnit
+from .db_edges import _CallGraphMixin
+from .db_search import _SearchMixin
+from .models import IndexStats, SourceFile, Unit
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -51,6 +53,7 @@ CREATE TABLE IF NOT EXISTS units (
 CREATE INDEX IF NOT EXISTS idx_units_file ON units(file_id);
 CREATE INDEX IF NOT EXISTS idx_units_name ON units(name);
 CREATE INDEX IF NOT EXISTS idx_units_qualname ON units(qualname);
+CREATE INDEX IF NOT EXISTS idx_units_unit_type ON units(unit_type);
 CREATE TABLE IF NOT EXISTS call_edges (
   caller_unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS call_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_call_edges_callee ON call_edges(callee);
 CREATE INDEX IF NOT EXISTS idx_call_edges_caller ON call_edges(caller_unit_id);
+CREATE INDEX IF NOT EXISTS idx_call_edges_callee_full ON call_edges(callee_full);
 CREATE TABLE IF NOT EXISTS ref_edges (
   unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -72,12 +76,15 @@ CREATE TABLE IF NOT EXISTS ref_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_ref_edges_ref ON ref_edges(ref);
 CREATE INDEX IF NOT EXISTS idx_ref_edges_unit ON ref_edges(unit_id);
+CREATE INDEX IF NOT EXISTS idx_ref_edges_ref_full ON ref_edges(ref_full);
 CREATE TABLE IF NOT EXISTS import_aliases (
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
   alias TEXT NOT NULL,
   target TEXT NOT NULL,
   PRIMARY KEY (file_id, alias)
 );
+CREATE INDEX IF NOT EXISTS idx_import_aliases_target ON import_aliases(target);
+CREATE INDEX IF NOT EXISTS idx_files_language ON files(language);
 """
 
 FTS_TRIGGERS = """
@@ -102,10 +109,11 @@ END;
 """
 
 
-class Database:
-    def __init__(self, db_path: Path, dimension: int = 384):
+class Database(_SearchMixin, _CallGraphMixin):
+    def __init__(self, db_path: Path, dimension: int = 384, migrate: bool = False):
         self.db_path = Path(db_path)
         self.dimension = dimension
+        self.migrate = migrate
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: the watch daemon re-indexes from a
         # debounce thread. The connection is still only ever used by one
@@ -182,8 +190,16 @@ class Database:
         if vector_schema:
             match = re.search(r"FLOAT\[(\d+)\]", vector_schema[0] or "", re.IGNORECASE)
             if match and int(match.group(1)) != self.dimension:
+                if not self.migrate:
+                    raise RuntimeError(
+                        f"embedding dimension mismatch: the index stores "
+                        f"{match.group(1)}-dimensional vectors but embedding.dimension "
+                        f"is {self.dimension}. Restore the original dimension or run "
+                        f"`urag embed --dimension {self.dimension} --reindex` to "
+                        f"rebuild embeddings."
+                    )
                 c.execute("DROP TABLE vec_units")
-        c.executescript(f"""
+        c.executescript("""
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_units USING fts5(
               name, qualname, signature, summary, concepts, relationships, unit_type, file_path,
               content='units', content_rowid='id',
@@ -203,25 +219,28 @@ class Database:
               embedding FLOAT[{self.dimension}]
             );
         """)
-        c.execute("DELETE FROM vec_units WHERE unit_id NOT IN (SELECT id FROM units)")
-        c.execute(
-            """
-            UPDATE call_edges SET callee_unit_id = NULL
-            WHERE callee_unit_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM units WHERE units.id = call_edges.callee_unit_id
-              )
-            """
-        )
-        c.execute(
-            """
-            UPDATE ref_edges SET ref_unit_id = NULL
-            WHERE ref_unit_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM units WHERE units.id = ref_edges.ref_unit_id
-              )
-            """
-        )
+        if self.migrate:
+            c.execute(
+                "DELETE FROM vec_units WHERE unit_id NOT IN (SELECT id FROM units)"
+            )
+            c.execute(
+                """
+                UPDATE call_edges SET callee_unit_id = NULL
+                WHERE callee_unit_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM units WHERE units.id = call_edges.callee_unit_id
+                  )
+                """
+            )
+            c.execute(
+                """
+                UPDATE ref_edges SET ref_unit_id = NULL
+                WHERE ref_unit_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM units WHERE units.id = ref_edges.ref_unit_id
+                  )
+                """
+            )
         if rebuild_fts:
             c.execute("INSERT INTO fts_units(fts_units) VALUES ('rebuild')")
         if not self.get_meta("ref_edges_v1"):
@@ -248,10 +267,6 @@ class Database:
         self.conn.commit()
 
     # ---------- files ----------
-
-    def all_files(self) -> dict[str, SourceFile]:
-        rows = self.conn.execute("SELECT * FROM files").fetchall()
-        return {r["path"]: SourceFile(**dict(r)) for r in rows}
 
     def known_paths(self) -> set[str]:
         return {r[0] for r in self.conn.execute("SELECT path FROM files")}
@@ -417,12 +432,6 @@ class Database:
         if commit:
             self.conn.commit()
 
-    def units_for_file(self, file_id: int) -> list[Unit]:
-        rows = self.conn.execute(
-            "SELECT * FROM units WHERE file_id = ?", (file_id,)
-        ).fetchall()
-        return [self._row_to_unit(r) for r in rows]
-
     def unit_by_id(self, unit_id: int) -> tuple[Unit, str, str] | None:
         """(unit, path, commit) for a unit id."""
         row = self.conn.execute(
@@ -450,90 +459,6 @@ class Database:
             s.by_language[r["language"]] = r["c"]
         return s
 
-    # ---------- retrieval ----------
-
-    def lexical_search(
-        self,
-        query: str,
-        limit: int = 30,
-        language: str | None = None,
-        exact: bool = False,
-    ) -> list[tuple[Unit, str, float]]:
-        q = self._safe_fts(query.strip())
-        if not q:
-            return []
-        exact_filter = ""
-        exact_params: tuple = ()
-        if exact:
-            exact_filter = "AND (u.name = ? OR u.qualname = ? OR f.path = ?)"
-            exact_params = (query.strip(), query.strip(), query.strip())
-        rows = self.conn.execute(
-            f"""
-            SELECT u.*, f.path,
-                   bm25(fts_units, 10.0, 8.0, 4.0, 2.0, 1.0, 1.0, 3.0, 2.0) AS score
-            FROM fts_units
-            JOIN units u ON u.id = fts_units.rowid
-            JOIN files f ON f.id = u.file_id
-            WHERE fts_units MATCH ? AND (? = '' OR f.language = ?) {exact_filter}
-            ORDER BY score
-            LIMIT ?
-            """,
-            (q, language or "", language or "", *exact_params, limit),
-        ).fetchall()
-        return [(self._row_to_unit(r), r["path"], r["score"]) for r in rows]
-
-    @staticmethod
-    def _safe_fts(query: str) -> str:
-        """Make a user query safe as an FTS5 MATCH expression.
-
-        Bare `:` would be parsed as a column filter (`Runner::run` -> column
-        "Runner"), and AND/OR/NOT are operator keywords. Quote every term.
-        """
-        import re
-
-        terms = [t for t in re.findall(r"[\w.$:#/+-]+", query, flags=re.UNICODE) if t]
-        if not terms:
-            return ""
-        if len(terms) == 1:
-            return f'"{terms[0]}"'
-        return " OR ".join(f'"{term}"' for term in terms)
-
-    def dense_search(
-        self, embedding: list[float], limit: int = 30, language: str | None = None
-    ) -> list[tuple[Unit, str, float]]:
-        vec_json = json.dumps(embedding)
-        q = "SELECT unit_id, distance FROM vec_units WHERE embedding MATCH ? "
-        params: list = [vec_json]
-        if language:
-            q += "AND language = ? "
-            params.append(language)
-        q += f"ORDER BY distance LIMIT {limit}"
-        rows = self.conn.execute(q, params).fetchall()
-        if not rows:
-            return []
-        ids = [row["unit_id"] for row in rows]
-        marks = ",".join("?" for _ in ids)
-        unit_rows = self.conn.execute(
-            f"SELECT u.*, f.path FROM units u JOIN files f ON f.id = u.file_id WHERE u.id IN ({marks})",
-            ids,
-        ).fetchall()
-        by_id: dict[int, tuple[Unit, str]] = {
-            row["id"]: (self._row_to_unit(row), row["path"]) for row in unit_rows
-        }
-        out: list[tuple[Unit, str, float]] = []
-        for r in rows:
-            got = by_id.get(r["unit_id"])
-            if got:
-                u, path = got
-                out.append((u, path, r["distance"]))
-        return out
-
-    def unit_embedding(self, unit_id: int) -> list[float] | None:
-        row = self.conn.execute(
-            "SELECT vec_f32(embedding) AS v FROM vec_units WHERE unit_id = ?",
-            (unit_id,),
-        ).fetchone()
-        return list(row["v"]) if row else None
 
     def store_embeddings(
         self, units: list[tuple[int, str, str, list[float]]], commit: bool = True
@@ -546,333 +471,10 @@ class Database:
         if commit:
             self.conn.commit()
 
-    def delete_embedding(self, unit_id: int) -> None:
-        self.conn.execute("DELETE FROM vec_units WHERE unit_id = ?", (unit_id,))
-        self.conn.commit()
-
     def clear_embeddings(self) -> None:
         self.conn.execute("DELETE FROM vec_units")
         self.conn.commit()
 
-    # ---------- call graph ----------
-
-    def replace_call_edges(
-        self, file_id: int, edges: list[tuple[int, str, str, int]], commit: bool = True
-    ) -> None:
-        """Replace all call edges of a file: (caller_unit_id, callee, full, line)."""
-        self.conn.execute("DELETE FROM call_edges WHERE file_id = ?", (file_id,))
-        self.conn.executemany(
-            "INSERT INTO call_edges(caller_unit_id, file_id, callee, callee_full, line, callee_unit_id) "
-            "VALUES (?, ?, ?, ?, ?, NULL)",
-            [(cid, file_id, callee, full, line) for cid, callee, full, line in edges],
-        )
-        if commit:
-            self.conn.commit()
-
-    def replace_import_aliases(
-        self, file_id: int, aliases: list[tuple[str, str]], commit: bool = True
-    ) -> None:
-        """Replace a file's import bindings: (alias, fully-qualified target)."""
-        self.conn.execute("DELETE FROM import_aliases WHERE file_id = ?", (file_id,))
-        self.conn.executemany(
-            "INSERT INTO import_aliases(file_id, alias, target) VALUES (?, ?, ?)",
-            [(file_id, a, t) for a, t in aliases],
-        )
-        if commit:
-            self.conn.commit()
-
-    def replace_ref_edges(
-        self,
-        file_id: int,
-        edges: list[tuple[int, str, str, str, int]],
-        commit: bool = True,
-    ) -> None:
-        """Replace all reference edges of a file:
-        (enclosing_unit_id, ref, ref_full, kind, line)."""
-        self.conn.execute("DELETE FROM ref_edges WHERE file_id = ?", (file_id,))
-        self.conn.executemany(
-            "INSERT INTO ref_edges(unit_id, file_id, ref, ref_full, kind, line, ref_unit_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-            [
-                (uid, file_id, ref, full, kind, line)
-                for uid, ref, full, kind, line in edges
-            ],
-        )
-        if commit:
-            self.conn.commit()
-
-    def callers(self, name: str, limit: int = 30) -> list[dict]:
-        """Units that call `name` (matches last segment or full chain).
-
-        For fully-qualified names, call sites written through import aliases
-        are resolved (e.g. `import os.path as op; op.exists()` is found when
-        querying `os.path.exists`). Alias bindings that collide with a local
-        symbol in the same file are ignored.
-        """
-        name = name.strip()
-        if not name:
-            return []
-        import re
-
-        esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
-        exact_ids = [
-            row["id"]
-            for row in self.conn.execute(
-                "SELECT id FROM units WHERE (name = ? OR qualname = ?) "
-                "AND kind = 'symbol' AND unit_type NOT IN ('import', 'config_key')",
-                (name, name),
-            ).fetchall()
-        ]
-        resolved_clause = ""
-        resolved_params: list = []
-        if exact_ids:
-            marks = ",".join("?" for _ in exact_ids)
-            resolved_clause = f" OR e.callee_unit_id IN ({marks})"
-            resolved_params.extend(exact_ids)
-        rows = self.conn.execute(
-            f"""
-            SELECT u.*, f.path, e.callee_full, e.line, '' AS resolved_target
-            FROM call_edges e
-            JOIN units u ON u.id = e.caller_unit_id
-            JOIN files f ON f.id = e.file_id
-            WHERE e.callee = ? OR e.callee_full = ? OR e.callee_full LIKE ? ESCAPE '\\'
-               OR e.callee_full LIKE ? ESCAPE '\\' {resolved_clause}
-            ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
-            """,
-            (name, name, f"%.{esc}", f"%::{esc}", *resolved_params),
-        ).fetchall()
-        by_unit: dict[int, dict] = {}
-        for r in rows:
-            by_unit.setdefault(r["id"], self._caller_row(r))
-        if any(sep in name for sep in (".", "::")):
-            # alias-aware matching: callee chains written through per-file
-            # import bindings resolve to the fully-qualified target
-            arows = self.conn.execute(
-                """
-                SELECT DISTINCT e.caller_unit_id, e.callee_full, e.line, f.path,
-                       u.*, ia.target AS resolved_target
-                FROM call_edges e
-                JOIN import_aliases ia ON ia.file_id = e.file_id
-                JOIN units u ON u.id = e.caller_unit_id
-                JOIN files f ON f.id = e.file_id
-                WHERE ((e.callee_full = ia.alias AND ia.target = ?)
-                    OR (e.callee_full = ia.alias || '.' || substr(?, length(ia.target) + 2)
-                        AND substr(?, 1, length(ia.target) + 1) = ia.target || '.'))
-                  AND NOT EXISTS (
-                       SELECT 1 FROM units u2 WHERE u2.file_id = ia.file_id
-                       AND u2.name = ia.alias AND u2.unit_type != 'import')
-                ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
-                """,
-                (name, name, name),
-            ).fetchall()
-            for r in arows:
-                by_unit.setdefault(r["id"], self._caller_row(r))
-        return list(by_unit.values())[:limit]
-
-    def _caller_row(self, r: dict) -> dict:
-        return {
-            "unit": self._row_to_unit(r),
-            "path": r["path"],
-            "callee_full": r["callee_full"],
-            "line": r["line"],
-            "resolved_target": r["resolved_target"],
-        }
-
-    def callees(self, unit_id: int) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT callee, callee_full, line FROM call_edges WHERE caller_unit_id = ? ORDER BY line",
-            (unit_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    def transitive_callers(
-        self, name: str, max_depth: int = 3, limit: int = 30
-    ) -> list[dict]:
-        """BFS over call_edges: all transitive callers of `name` (callers-of-
-        callers, ...). Each row gains `hop` (1 = direct caller). Cycles are
-        handled via a visited set; each unit appears at its shortest hop."""
-        name = name.strip()
-        if not name:
-            return []
-        visited: dict[int, dict] = {}
-        frontier: list[str] = [name]
-        for hop in range(1, max_depth + 1):
-            nxt: list[str] = []
-            for callee in frontier:
-                for row in self.callers(callee, limit=10000):
-                    uid = row["unit"].id
-                    if uid in visited:
-                        continue
-                    visited[uid] = row | {"hop": hop}
-                    u = row["unit"]
-                    nxt.append(u.name)
-                    if u.qualname and u.qualname != u.name:
-                        nxt.append(u.qualname)
-            if not nxt:
-                break
-            frontier = list(dict.fromkeys(nxt))
-        return [visited[uid] for uid in visited][:limit]
-
-    def references(self, name: str, limit: int = 30) -> list[dict]:
-        """Units that reference `name`: type mentions, constructions, bases,
-        annotations, casts, attributes, XAML bindings.
-
-        Alias-aware like callers(): references written through per-file
-        import bindings resolve to fully-qualified targets.
-        """
-        name = name.strip()
-        if not name:
-            return []
-        import re
-
-        esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
-        exact_ids = [
-            row["id"]
-            for row in self.conn.execute(
-                "SELECT id FROM units WHERE (name = ? OR qualname = ?) "
-                "AND kind = 'symbol' AND unit_type NOT IN ('import', 'config_key')",
-                (name, name),
-            ).fetchall()
-        ]
-        resolved_clause = ""
-        resolved_params: list = []
-        if exact_ids:
-            marks = ",".join("?" for _ in exact_ids)
-            resolved_clause = f" OR e.ref_unit_id IN ({marks})"
-            resolved_params.extend(exact_ids)
-        rows = self.conn.execute(
-            f"""
-            SELECT u.*, f.path, e.ref_full, e.kind AS ref_kind, e.line, '' AS resolved_target
-            FROM ref_edges e
-            JOIN units u ON u.id = e.unit_id
-            JOIN files f ON f.id = e.file_id
-            WHERE e.ref = ? OR e.ref_full = ? OR e.ref_full LIKE ? ESCAPE '\\'
-               OR e.ref_full LIKE ? ESCAPE '\\' {resolved_clause}
-            ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
-            """,
-            (name, name, f"%.{esc}", f"%::{esc}", *resolved_params),
-        ).fetchall()
-        by_unit: dict[int, dict] = {}
-        for r in rows:
-            by_unit.setdefault(r["id"], self._ref_row(r))
-        if any(sep in name for sep in (".", "::")):
-            arows = self.conn.execute(
-                """
-                SELECT DISTINCT e.unit_id, e.ref_full, e.kind AS ref_kind, e.line, f.path,
-                       u.*, ia.target AS resolved_target
-                FROM ref_edges e
-                JOIN import_aliases ia ON ia.file_id = e.file_id
-                JOIN units u ON u.id = e.unit_id
-                JOIN files f ON f.id = e.file_id
-                WHERE ((e.ref_full = ia.alias AND ia.target = ?)
-                    OR (e.ref_full = ia.alias || '.' || substr(?, length(ia.target) + 2)
-                        AND substr(?, 1, length(ia.target) + 1) = ia.target || '.'))
-                  AND NOT EXISTS (
-                       SELECT 1 FROM units u2 WHERE u2.file_id = ia.file_id
-                       AND u2.name = ia.alias AND u2.unit_type != 'import')
-                ORDER BY CASE WHEN f.path LIKE '%test%' THEN 1 ELSE 0 END, e.line
-                """,
-                (name, name, name),
-            ).fetchall()
-            for r in arows:
-                by_unit.setdefault(r["id"], self._ref_row(r))
-        return list(by_unit.values())[:limit]
-
-    def _ref_row(self, r: dict) -> dict:
-        return {
-            "unit": self._row_to_unit(r),
-            "path": r["path"],
-            "ref_full": r["ref_full"],
-            "kind": r["ref_kind"],
-            "line": r["line"],
-            "resolved_target": r["resolved_target"],
-        }
-
-    def transitive_references(
-        self, name: str, max_depth: int = 3, limit: int = 30
-    ) -> list[dict]:
-        """BFS over ref_edges: all transitive referencers of `name`. Each row
-        gains `hop` (1 = direct referencer). Cycles handled via visited set."""
-        name = name.strip()
-        if not name:
-            return []
-        visited: dict[int, dict] = {}
-        frontier: list[str] = [name]
-        for hop in range(1, max_depth + 1):
-            nxt: list[str] = []
-            for ref in frontier:
-                for row in self.references(ref, limit=10000):
-                    uid = row["unit"].id
-                    if uid in visited:
-                        continue
-                    visited[uid] = row | {"hop": hop}
-                    u = row["unit"]
-                    nxt.append(u.name)
-                    if u.qualname and u.qualname != u.name:
-                        nxt.append(u.qualname)
-            if not nxt:
-                break
-            frontier = list(dict.fromkeys(nxt))
-        return [visited[uid] for uid in visited][:limit]
-
-    def unreferenced_symbols(
-        self, limit: int = 50, language: str | None = None
-    ) -> list[dict]:
-        """Candidate dead symbols: symbol units with no incoming call edges
-        and no incoming reference edges. Excludes imports, config keys and
-        test files. Heuristic only — dynamic dispatch, reflection, XAML
-        bindings of unsupported flavors, and external entry points can
-        produce false positives."""
-        excluded_types = (
-            "import",
-            "config_key",
-            "file",
-            "resource",
-            "template",
-            "element",
-            "event",
-        )
-        marks = ",".join("?" for _ in excluded_types)
-        rows = self.conn.execute(
-            f"""
-            SELECT u.*, f.path
-            FROM units u
-            JOIN files f ON f.id = u.file_id
-            WHERE u.kind = 'symbol'
-              AND u.unit_type NOT IN ({marks})
-              AND f.path NOT LIKE '%test%'
-              AND f.path NOT LIKE '%spec%'
-              AND (? = '' OR f.language = ?)
-              AND NOT EXISTS (
-                  SELECT 1 FROM call_edges e
-                  WHERE e.callee = u.name
-                     OR e.callee_full = u.qualname
-                     OR e.callee_full = u.name
-                     OR e.callee_unit_id = u.id
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM ref_edges r
-                  WHERE r.ref = u.name
-                     OR r.ref_full = u.qualname
-                     OR r.ref_full = u.name
-                     OR r.ref_unit_id = u.id
-              )
-            ORDER BY f.path, u.start_line
-            LIMIT ?
-            """,
-            (*excluded_types, language or "", language or "", limit),
-        ).fetchall()
-        return [
-            {
-                "unit": self._row_to_unit(r),
-                "path": r["path"],
-                "ref_full": "",
-                "kind": "",
-                "line": r["start_line"],
-                "resolved_target": "",
-            }
-            for r in rows
-        ]
 
     # ---------- evidence (L2) ----------
 
@@ -900,7 +502,8 @@ class Database:
         with p.open("r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         lines = text.splitlines()
-        span = lines[u.start_line - 1 : u.end_line]
+        first = max(u.start_line, 1)
+        span = lines[first - 1 : u.end_line]
         return {
             "unit_id": u.id,
             "file": path,
@@ -933,121 +536,6 @@ class Database:
             parent_id=r["parent_id"],
         )
 
-    # ---------- navigation (agent file/symbol browsing) ----------
-
-    def file_list(self, language: str | None = None) -> list[dict]:
-        """All indexed files: (path, language, kind, size, commit, units)."""
-        q = """
-            SELECT f.path, f.language, f.kind, f.size, f."commit",
-                   COUNT(u.id) AS unit_count
-            FROM files f LEFT JOIN units u ON u.file_id = f.id
-        """
-        params: list = []
-        if language:
-            q += " WHERE f.language = ?"
-            params.append(language)
-        q += " GROUP BY f.id ORDER BY f.path"
-        return [dict(r) for r in self.conn.execute(q, params).fetchall()]
-
-    def file_by_path(self, path: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM files WHERE path = ?", (path,)
-        ).fetchone()
-        return dict(row) if row else None
-
-    def units_by_file_path(self, path: str) -> list[Unit]:
-        rows = self.conn.execute(
-            "SELECT u.* FROM units u JOIN files f ON f.id = u.file_id "
-            "WHERE f.path = ? ORDER BY u.start_line, u.start_col",
-            (path,),
-        ).fetchall()
-        return [self._row_to_unit(r) for r in rows]
-
-    def resolve_units(
-        self, name: str, limit: int = 30, language: str | None = None
-    ) -> list[tuple[Unit, str, str]]:
-        """Exact symbol definition lookup by name or qualname."""
-        name = name.strip()
-        if not name:
-            return []
-        rows = self.conn.execute(
-            """
-            SELECT u.*, f.path, f."commit"
-            FROM units u JOIN files f ON f.id = u.file_id
-            WHERE u.kind = 'symbol' AND u.unit_type != 'import'
-              AND (u.name = ? OR u.qualname = ? OR u.qualname LIKE ? ESCAPE '\\')
-              AND (? = '' OR f.language = ?)
-            ORDER BY (u.qualname = ?) DESC, (u.name = ?) DESC,
-                     (u.unit_type = 'class' OR u.unit_type = 'struct'
-                      OR u.unit_type = 'interface' OR u.unit_type = 'enum') DESC,
-                     u.name
-            LIMIT ?
-            """,
-            (
-                name,
-                name,
-                "%." + name.replace("_", r"\_"),
-                language or "",
-                language or "",
-                name,
-                name,
-                limit,
-            ),
-        ).fetchall()
-        return [(self._row_to_unit(r), r["path"], r["commit"]) for r in rows]
-
-    def children_of(self, parent_id: int) -> list[Unit]:
-        rows = self.conn.execute(
-            "SELECT u.* FROM units u JOIN files f ON f.id = u.file_id "
-            "WHERE u.parent_id = ? ORDER BY u.start_line, u.start_col",
-            (parent_id,),
-        ).fetchall()
-        return [self._row_to_unit(r) for r in rows]
-
-    def siblings_of(self, unit_id: int) -> list[Unit]:
-        row = self.conn.execute(
-            "SELECT parent_id FROM units WHERE id = ?", (unit_id,)
-        ).fetchone()
-        if row is None or row["parent_id"] is None:
-            return []
-        return self.children_of(row["parent_id"])
-
-    def importers(self, target: str, limit: int = 50) -> list[dict]:
-        """Files/units that import a module or symbol (dependents).
-
-        Matches import_aliases targets and import-unit qualnames against
-        `target` (exact or sub-module prefix)."""
-        target = target.strip()
-        if not target:
-            return []
-        out: dict[str, dict] = {}
-        rows = self.conn.execute(
-            """
-            SELECT DISTINCT f.path, ia.alias, ia.target, NULL AS unit_id, f."commit"
-            FROM import_aliases ia JOIN files f ON f.id = ia.file_id
-            WHERE ia.target = ? OR ia.target LIKE ? ESCAPE '\\'
-            ORDER BY f.path
-            LIMIT ?
-            """,
-            (target, target + ".%", limit),
-        ).fetchall()
-        for r in rows:
-            out.setdefault(r["path"], dict(r))
-        urows = self.conn.execute(
-            """
-            SELECT u.id AS unit_id, f.path, '' AS alias, u.qualname AS target, f."commit"
-            FROM units u JOIN files f ON f.id = u.file_id
-            WHERE u.unit_type = 'import' AND (u.qualname = ? OR u.qualname LIKE ? ESCAPE '\\')
-            ORDER BY f.path
-            LIMIT ?
-            """,
-            (target, target + ".%", limit),
-        ).fetchall()
-        for r in urows:
-            key = r["path"]
-            if key not in out or out[key]["unit_id"] is None:
-                out.setdefault(key, dict(r))
-        return list(out.values())[:limit]
 
     def close(self) -> None:
         self.conn.close()

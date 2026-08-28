@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import math
+import threading
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Iterable
 
 import pathspec
 
@@ -19,6 +20,8 @@ from .git_aware import Git
 from .models import SourceFile, Unit
 
 BATCH = 64
+
+_WRITE_LOCK = threading.Lock()
 
 # Bump when extraction semantics change; existing indexes are fully
 # re-extracted (embeddings for unchanged retrieval keys are preserved).
@@ -32,9 +35,7 @@ def _noop(msg: str) -> None:
 
 
 class Indexer:
-    def __init__(
-        self, cfg: Config, db: Database, embedder: Embedder, progress: Progress = _noop
-    ):
+    def __init__(self, cfg: Config, db: Database, embedder: Embedder, progress: Progress = _noop):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
@@ -44,6 +45,7 @@ class Indexer:
         self.git = Git(self._root)
         self._head = self.git.head()
         self._changed_symbol_names: set[str] = set()
+        self._git_dirty: set[str] | None = None
         fingerprint = self.cfg.embedding.fingerprint()
         if self.db.get_meta("embedding_fingerprint") != fingerprint:
             self.db.clear_embeddings()
@@ -57,15 +59,12 @@ class Indexer:
             gi = self._root / ".gitignore"
             if gi.exists():
                 specs.append(
-                    pathspec.PathSpec.from_lines(
-                        "gitwildmatch",
+                    pathspec.GitIgnoreSpec.from_lines(
                         gi.read_text(encoding="utf-8", errors="replace").splitlines(),
                     )
                 )
         excludes = list(self.cfg.index.exclude)
-        specs.append(
-            pathspec.PathSpec.from_lines("gitwildmatch", [f"{e}/" for e in excludes])
-        )
+        specs.append(pathspec.PathSpec.from_lines("gitignore", [f"{e}/" for e in excludes]))
         return specs
 
     def _is_excluded(self, rel: str) -> bool:
@@ -93,7 +92,7 @@ class Indexer:
                 continue
             if result is None:
                 continue
-            lang, kind = result
+            lang, _kind = result
             if lang not in langs and not (lang == "tsx" and "typescript" in langs):
                 continue
             try:
@@ -107,9 +106,21 @@ class Indexer:
     # ---------- indexing ----------
 
     def index_all(self) -> dict:
+        with _WRITE_LOCK:
+            return self._index_all()
+
+    def _refresh_git_dirty(self) -> None:
+        if self._head and self.git.is_repo():
+            changed, _, untracked = self.git.working_paths()
+            self._git_dirty = changed | untracked
+        else:
+            self._git_dirty = None
+
+    def _index_all(self) -> dict:
         start = time.monotonic()
         self._head = self.git.head(refresh=True)
         self._changed_symbol_names.clear()
+        self._refresh_git_dirty()
         files = self.discover()
         known = self.db.known_paths()
         current = {f.relative_to(self._root).as_posix() for f in files}
@@ -122,14 +133,12 @@ class Indexer:
             self.db.delete_files(sorted(deleted))
             self.progress(f"removed {len(deleted)} deleted file(s)")
         force = False
-        if self.db.get_meta("refs_pending") == "1":
-            # index predates ref_edges: re-extract everything once so
-            # reference edges exist for unchanged files too.
-            self.db.delete_meta("refs_pending")
+        refs_pending = self.db.get_meta("refs_pending") == "1"
+        if refs_pending:
             self.progress("upgrading index: extracting reference edges")
             force = True
-        if self.db.get_meta("extractor_version") != EXTRACTOR_VERSION:
-            self.db.set_meta("extractor_version", EXTRACTOR_VERSION)
+        extractor_stale = self.db.get_meta("extractor_version") != EXTRACTOR_VERSION
+        if extractor_stale:
             self.progress("upgrading index: extractor changed, re-extracting")
             force = True
         changed = files if force else [f for f in files if self._needs_reindex(f)]
@@ -140,9 +149,13 @@ class Indexer:
                 changed_file_ids.add(file_id)
         self._resolve_call_edges(changed_file_ids)
         self._embed_missing()
+        if refs_pending:
+            self.db.delete_meta("refs_pending")
+        if extractor_stale:
+            self.db.set_meta("extractor_version", EXTRACTOR_VERSION)
         if self._head:
             self.db.set_meta("last_commit", self._head)
-        self.db.set_meta("last_indexed_at", datetime.now(timezone.utc).isoformat())
+        self.db.set_meta("last_indexed_at", datetime.now(UTC).isoformat())
         s = self.db.stats()
         self.progress(
             f"indexed {len(files)} files ({len(changed)} updated), {s.units} units, {s.embedded} embedded "
@@ -151,9 +164,14 @@ class Indexer:
         return {"files": len(files), "changed": len(changed), "deleted": len(deleted)}
 
     def index_paths(self, paths: Iterable[Path]) -> dict:
+        with _WRITE_LOCK:
+            return self._index_paths(paths)
+
+    def _index_paths(self, paths: Iterable[Path]) -> dict:
         """Incremental re-index of specific paths (watcher)."""
         self._head = self.git.head(refresh=True)
         self._changed_symbol_names.clear()
+        self._refresh_git_dirty()
         changed: list[Path] = []
         deleted: list[str] = []
         for p in paths:
@@ -170,12 +188,17 @@ class Indexer:
                 continue
             if result is None:
                 continue
-            lang, kind = result
+            lang, _kind = result
             if lang not in self.cfg.index.languages and not (
                 lang == "tsx" and "typescript" in self.cfg.index.languages
             ):
                 continue
             if self._is_excluded(rel):
+                continue
+            try:
+                if p.stat().st_size > self.cfg.index.max_file_bytes:
+                    continue
+            except OSError:
                 continue
             if self._needs_reindex(p):
                 changed.append(p)
@@ -190,7 +213,7 @@ class Indexer:
         self._embed_missing()
         if self._head:
             self.db.set_meta("last_commit", self._head)
-        self.db.set_meta("last_indexed_at", datetime.now(timezone.utc).isoformat())
+        self.db.set_meta("last_indexed_at", datetime.now(UTC).isoformat())
         return {"changed": len(changed), "deleted": len(deleted)}
 
     def _needs_reindex(self, p: Path) -> bool:
@@ -198,19 +221,22 @@ class Indexer:
             st = p.stat()
         except OSError:
             return False
+        rel = p.relative_to(self._root).as_posix()
         row = self.db.conn.execute(
             "SELECT size, mtime, sha256 FROM files WHERE path = ?",
-            (p.relative_to(self._root).as_posix(),),
+            (rel,),
         ).fetchone()
         if row is None:
             return True
         if row["size"] != st.st_size or abs(row["mtime"] - st.st_mtime) > 1e-6:
             return True
-        try:
-            digest = hashlib.sha256(p.read_bytes()).hexdigest()
-        except OSError:
-            return False
-        return digest != row["sha256"]
+        if self._git_dirty is None or rel in self._git_dirty:
+            try:
+                digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            except OSError:
+                return False
+            return digest != row["sha256"]
+        return False
 
     def _index_file(self, p: Path) -> int | None:
         rel = p.relative_to(self._root).as_posix()
@@ -229,9 +255,7 @@ class Indexer:
             text = data.decode("utf-8", errors="replace")
         extractor = get_extractor(lang)
         units = extractor.extract(text, rel) if extractor else []
-        existing = self.db.conn.execute(
-            "SELECT id FROM files WHERE path = ?", (rel,)
-        ).fetchone()
+        existing = self.db.conn.execute("SELECT id FROM files WHERE path = ?", (rel,)).fetchone()
         if existing:
             old_units = self.db.conn.execute(
                 "SELECT name, qualname FROM units WHERE file_id = ? AND kind = 'symbol' "
@@ -255,7 +279,7 @@ class Indexer:
             mtime=st.st_mtime,
             sha256=hashlib.sha256(data).hexdigest(),
             commit=self._head or "",
-            indexed_at=datetime.now(timezone.utc).isoformat(),
+            indexed_at=datetime.now(UTC).isoformat(),
         )
         try:
             file_id = self.db.upsert_file(f, commit=False)
@@ -295,14 +319,10 @@ class Indexer:
         units = self._units_missing_embeddings()
         if not units:
             return 0
-        lang_rows = dict(
-            self.db.conn.execute("SELECT id, language FROM files").fetchall()
-        )
+        lang_rows = dict(self.db.conn.execute("SELECT id, language FROM files").fetchall())
         path_rows = dict(self.db.conn.execute("SELECT id, path FROM files").fetchall())
         parent_rows = dict(
-            self.db.conn.execute(
-                "SELECT id, qualname FROM units WHERE qualname != ''"
-            ).fetchall()
+            self.db.conn.execute("SELECT id, qualname FROM units WHERE qualname != ''").fetchall()
         )
         n = 0
         t0 = time.monotonic()
@@ -314,9 +334,7 @@ class Indexer:
                     for part in (
                         f"file: {path_rows.get(u.file_id, '')}",
                         f"language: {lang_rows.get(u.file_id, '')}",
-                        f"parent: {parent_rows.get(u.parent_id, '')}"
-                        if u.parent_id
-                        else "",
+                        f"parent: {parent_rows.get(u.parent_id, '')}" if u.parent_id else "",
                         u.retrieval_key,
                     )
                     if part
@@ -329,10 +347,8 @@ class Indexer:
                     f"embedding provider returned {len(vecs)} vectors for {len(batch)} units"
                 )
             rows = []
-            for u, v in zip(batch, vecs):
-                if len(v) != self.embedder.dimension or not all(
-                    math.isfinite(x) for x in v
-                ):
+            for u, v in zip(batch, vecs, strict=True):
+                if len(v) != self.embedder.dimension or not all(math.isfinite(x) for x in v):
                     raise RuntimeError(f"invalid embedding for unit {u.id}")
                 rows.append((u.id, lang_rows.get(u.file_id, ""), u.kind, v))
             self.db.store_embeddings(rows)
@@ -345,18 +361,14 @@ class Indexer:
 
     # ---------- call graph ----------
 
-    def _map_calls(
-        self, units: list[Unit], calls: list
-    ) -> list[tuple[int, str, str, int]]:
+    def _map_calls(self, units: list[Unit], calls: list) -> list[tuple[int, str, str, int]]:
         """Map call sites to the innermost enclosing symbol unit.
         Returns (unit_id, callee, callee_full, line)."""
         funcs = sorted(
             [
                 u
                 for u in units
-                if u.is_symbol
-                and u.unit_type not in ("import", "config_key")
-                and u.id is not None
+                if u.is_symbol and u.unit_type not in ("import", "config_key") and u.id is not None
             ],
             key=lambda u: u.byte_start,
         )
@@ -368,27 +380,20 @@ class Indexer:
             idx = bisect.bisect_right(starts, c.byte_start) - 1
             while idx >= 0:
                 caller = funcs[idx]
-                if (
-                    caller.id is not None
-                    and caller.byte_start <= c.byte_start < caller.byte_end
-                ):
+                if caller.id is not None and caller.byte_start <= c.byte_start < caller.byte_end:
                     edges.append((caller.id, c.callee, c.callee_full, c.line))
                     break
                 idx -= 1
         return edges
 
-    def _map_refs(
-        self, units: list[Unit], refs: list
-    ) -> list[tuple[int, str, str, str, int]]:
+    def _map_refs(self, units: list[Unit], refs: list) -> list[tuple[int, str, str, str, int]]:
         """Map reference sites to the innermost enclosing symbol unit.
         Returns (unit_id, ref, ref_full, kind, line)."""
         funcs = sorted(
             [
                 u
                 for u in units
-                if u.is_symbol
-                and u.unit_type not in ("import", "config_key")
-                and u.id is not None
+                if u.is_symbol and u.unit_type not in ("import", "config_key") and u.id is not None
             ],
             key=lambda u: u.byte_start,
         )
@@ -400,14 +405,10 @@ class Indexer:
             idx = bisect.bisect_right(starts, c.byte_start) - 1
             while idx >= 0:
                 caller = funcs[idx]
-                if (
-                    caller.id is not None
-                    and caller.byte_start <= c.byte_start < caller.byte_end
-                ):
+                if caller.id is not None and caller.byte_start <= c.byte_start < caller.byte_end:
                     edges.append((caller.id, c.target, c.target_full, c.kind, c.line))
                     break
                 idx -= 1
-        return edges
         return edges
 
     def _resolve_call_edges(self, changed_file_ids: set[int] | None = None) -> None:
@@ -426,9 +427,7 @@ class Indexer:
             by_name.setdefault(row["name"], []).append(row)
             by_qualname.setdefault(row["qualname"], []).append(row)
         aliases: dict[int, dict[str, str]] = {}
-        for row in self.db.conn.execute(
-            "SELECT file_id, alias, target FROM import_aliases"
-        ):
+        for row in self.db.conn.execute("SELECT file_id, alias, target FROM import_aliases"):
             aliases.setdefault(row["file_id"], {})[row["alias"]] = row["target"]
 
         def module_name(path: str) -> str:
@@ -436,9 +435,7 @@ class Indexer:
 
         def resolve(file_id: int, callee: str, full: str) -> int | None:
             local = by_file.get(file_id, [])
-            candidates = [
-                r for r in local if r["name"] == callee or r["qualname"] == full
-            ]
+            candidates = [r for r in local if r["name"] == callee or r["qualname"] == full]
             if len(candidates) == 1:
                 return candidates[0]["id"]
             binding = aliases.get(file_id, {})
@@ -458,9 +455,7 @@ class Indexer:
                 if len(parts) == 2:
                     module, symbol = parts
                     qualified = [
-                        r
-                        for r in by_name.get(symbol, [])
-                        if module_name(r["path"]) == module
+                        r for r in by_name.get(symbol, []) if module_name(r["path"]) == module
                     ]
                     if len(qualified) == 1:
                         return qualified[0]["id"]
@@ -479,14 +474,9 @@ class Indexer:
                 edge_params.extend(changed_file_ids)
             if self._changed_symbol_names:
                 name_marks = ",".join("?" for _ in self._changed_symbol_names)
-                clauses.extend(
-                    (f"callee IN ({name_marks})", f"callee_full IN ({name_marks})")
-                )
+                clauses.extend((f"callee IN ({name_marks})", f"callee_full IN ({name_marks})"))
                 clauses.append(
-                    "EXISTS ("
-                    "SELECT 1 FROM import_aliases ia "
-                    "WHERE ia.file_id = call_edges.file_id"
-                    ")"
+                    "EXISTS (SELECT 1 FROM import_aliases ia WHERE ia.file_id = call_edges.file_id)"
                 )
                 names = sorted(self._changed_symbol_names)
                 edge_params.extend(names)
@@ -509,14 +499,9 @@ class Indexer:
                 ref_params.extend(changed_file_ids)
             if self._changed_symbol_names:
                 name_marks = ",".join("?" for _ in self._changed_symbol_names)
-                clauses.extend(
-                    (f"ref IN ({name_marks})", f"ref_full IN ({name_marks})")
-                )
+                clauses.extend((f"ref IN ({name_marks})", f"ref_full IN ({name_marks})"))
                 clauses.append(
-                    "EXISTS ("
-                    "SELECT 1 FROM import_aliases ia "
-                    "WHERE ia.file_id = ref_edges.file_id"
-                    ")"
+                    "EXISTS (SELECT 1 FROM import_aliases ia WHERE ia.file_id = ref_edges.file_id)"
                 )
                 names = sorted(self._changed_symbol_names)
                 ref_params.extend(names)

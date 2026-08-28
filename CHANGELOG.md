@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+- Module structure: the call-graph/reference queries moved to
+  `db_edges.py`, search/navigation queries to `db_search.py` (mixins over
+  the storage core), and the native-language extractors split into
+  per-language modules (`go_ext`, `rust_ext`, `java_ext`, `c_ext`,
+  `csharp_ext`) with shared helpers in `native_common`; `native_ext` remains
+  as a compatibility re-export. Public imports are unchanged.
+- Incremental indexing in git repos no longer re-hashes files whose
+  size+mtime match and whose working-tree content is clean vs HEAD
+  (untracked/modified files still get content-verified). Non-git repos keep
+  the exact-hash behavior.
+- CLI: `read`, `status`, and `doctor` now support `--json` machine-readable
+  output; `doctor --json` reports a structured health payload and exits
+  non-zero on failure.
+- Retrieval precision: definition queries no longer treat common English
+  words (user, count, code, file, test, ...) as exact symbol identifiers,
+  which reduces false-positive exact-match boosts.
+- MCP: documented the tool-naming contract — server tools are short names
+  (`search`, `fetch_unit`, ...) and agent harnesses expose them prefixed
+  with the server name (e.g. `urag_search`); instructions updated in the
+  server and the skill doc.
+- Fixed a destructive read path: opening an index whose stored vector
+  dimension differs from `embedding.dimension` now raises a clear error
+  instead of silently dropping all embeddings; the rebuild only happens on
+  explicit migrate opens (`urag index`, `urag init --full`,
+  `urag embed --reindex`, MCP `index_now`/`init_project`).
+- Fixed `http_timeout` being dropped when the config was rewritten; fixed
+  the embedder cache key missing `dimension` in the MCP server; MCP logs
+  embedding fallbacks to stderr instead of degrading silently.
+- `urag embed` now verifies the new local model loads before purging the
+  old model cache, and clears old embeddings only when something changed.
+- Indexer: `refs_pending`/`extractor_version` upgrade flags are now written
+  after a successful re-extraction (no half-migrated indexes after a crash);
+  added a process-wide write lock so the watcher and manual runs can't
+  interleave; `index_paths` now respects `max_file_bytes`.
+- Watcher: fixed a debounce race where a stale timer flush could clear the
+  pending set of a newer timer (duplicate index work).
+- Schema: added indexes on `call_edges.callee_full`, `ref_edges.ref_full`,
+  `import_aliases.target`, `units.unit_type`, `files.language`; orphan
+  cleanup now runs on index opens only.
+- Fixed `%` wildcard leaks in `resolve_units`/`importers`, an off-by-one in
+  `load_evidence` for units with `start_line = 0`, and char-vs-byte offset
+  attribution in the chunk baseline.
+- `--evidence` budgets are now split evenly with no over-allocation floor;
+  navigation budgets (`resolve`, `children`, `symbols`) respect
+  `retrieval.max_evidence_tokens`; `top_k=0` is honored.
+- Retrieval: definition-symbol extraction no longer captures trailing words
+  ("where is X defined in tests"); regexes compiled once; eval loop closures
+  now bind their question (previously all systems re-ran the last question).
+- C# extractor reuses a cached parser (was recompiling the grammar per
+  method); Python extractor defers tree-sitter grammar compilation to first
+  use; eval orchestration moved out of the CLI into `eval.run_eval`.
+- Eval harness: `--reresolve` now re-derives gold for reference questions
+  from the current index (previously stale ids survived index rebuilds).
+- Removed dead code (unused DB methods, model helpers, extractor helpers)
+  and unused imports; added a ruff configuration and a CI lint step.
+
 ## 0.1.5 - 2026-08-26
 
 - Added a reference index (type mentions, constructions, bases, generics,

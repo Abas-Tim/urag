@@ -80,10 +80,14 @@ class Git:
 
     def changed_paths(self) -> tuple[set[str], set[str]]:
         """(changed, deleted) repo-relative paths vs the working tree."""
-        changed, deleted, _ = self._parse_status_porcelain(
+        changed, deleted, _ = self.working_paths()
+        return changed, deleted
+
+    def working_paths(self) -> tuple[set[str], set[str], set[str]]:
+        """(changed, deleted, untracked) repo-relative paths in the working tree."""
+        return self._parse_status_porcelain(
             self._run(["status", "--porcelain", "-z", "--untracked-files=all"]) or ""
         )
-        return changed, deleted
 
     def changed_since(self, commit: str) -> set[str]:
         """Files that differ between commit and the working tree."""
@@ -122,7 +126,7 @@ class Git:
         )
         if log:
             for block in log.split("\n\n"):
-                lines = [l for l in block.splitlines() if l]
+                lines = [ln for ln in block.splitlines() if ln]
                 if not lines:
                     continue
                 fields = lines[0].split("\x1f")
@@ -134,7 +138,7 @@ class Git:
                         "short": fields[1],
                         "subject": fields[2],
                         "date": fields[3],
-                        "files": [Path(l).as_posix() for l in lines[1:]],
+                        "files": [Path(ln).as_posix() for ln in lines[1:]],
                     }
                 )
         return result

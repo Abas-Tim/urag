@@ -1,9 +1,9 @@
 import re
 
 import pytest
-import urag.cli as cli
 from typer.testing import CliRunner
 
+import urag.cli as cli
 from urag.config import load_config
 from urag.db import Database
 from urag.embed import LocalEmbedder, model_cache_subdir, purge_model_cache
@@ -48,7 +48,7 @@ def test_embed_switch_clears_embeddings_and_updates_config(tmp_path, monkeypatch
     cfg2 = load_config(tmp_path)
     assert cfg2.embedding.model == "BAAI/bge-small-en-v1.5"
     assert cfg2.embedding.dimension == 384
-    db = Database(cfg.db_path, cfg2.embedding.dimension)
+    db = Database(cfg.db_path, cfg2.embedding.dimension, migrate=True)
     assert db.stats().embedded == 0
     assert db.get_meta("embedding_fingerprint") == ""
     db.close()
@@ -143,9 +143,7 @@ def test_embed_switch_works_without_index(tmp_path, monkeypatch):
 
 def test_embed_invalid_provider_fails(tmp_path):
     _init(tmp_path)
-    result = CliRunner().invoke(
-        cli.app, ["embed", "--root", str(tmp_path), "--provider", "cloud"]
-    )
+    result = CliRunner().invoke(cli.app, ["embed", "--root", str(tmp_path), "--provider", "cloud"])
     assert result.exit_code != 0
     assert "provider must be" in result.output
 

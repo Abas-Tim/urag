@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 
-from ..models import Unit, UNIT_KIND_SYMBOL
+from ..models import UNIT_KIND_SYMBOL, Unit
 from .base import Extractor, collapse_ws
 
 MAX_VALUE_CHARS = 200
@@ -67,7 +67,7 @@ class ConfigExtractor(Extractor):
         qualname: str,
         value: str,
     ) -> Unit:
-        name = qualname.split(".")[-1]
+        name = qualname.rsplit(".", maxsplit=1)[-1]
         return Unit(
             file_id=0,
             kind=UNIT_KIND_SYMBOL,
@@ -198,7 +198,7 @@ class ConfigExtractor(Extractor):
             m = _TOML_KEY.match(stripped)
             if m:
                 key = m.group(1)
-                qualname = ".".join(table + [key])
+                qualname = ".".join([*table, key])
                 value = collapse_ws(stripped[m.end() :], MAX_VALUE_CHARS)
                 units.append(self._make(offsets, line_no, raw, qualname, value))
         return units
@@ -226,7 +226,7 @@ class ConfigExtractor(Extractor):
             key = key.strip()
             if not key or " " in key:
                 continue
-            qualname = ".".join(section + [key])
+            qualname = ".".join([*section, key])
             value = collapse_ws(value, MAX_VALUE_CHARS)
             units.append(self._make(offsets, line_no, raw, qualname, value))
         return units

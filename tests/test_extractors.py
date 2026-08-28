@@ -1,9 +1,9 @@
 """Smoke tests for extractors."""
 
+from urag.extractors.base import ByteIndexedSource
+from urag.extractors.markdown_ext import MarkdownExtractor
 from urag.extractors.python_ext import PythonExtractor
 from urag.extractors.ts_ext import TsExtractor
-from urag.extractors.markdown_ext import MarkdownExtractor
-from urag.extractors.base import ByteIndexedSource
 
 
 def test_byte_indexed_source_uses_utf8_byte_ranges():
@@ -49,7 +49,7 @@ def test_python_extractor_tolerates_malformed_definitions():
 
     assert [(unit.unit_type, unit.name) for unit in units] == [("function", "broken")]
     assert units[0].byte_start == 0
-    assert units[0].byte_end == len("def broken(:\n    pass".encode("utf-8"))
+    assert units[0].byte_end == len(b"def broken(:\n    pass")
 
 
 def test_ts_extractor():

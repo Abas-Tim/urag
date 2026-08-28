@@ -28,26 +28,32 @@ _embedder_cache: dict[str, Embedder] = {}
 
 INSTRUCTIONS = """You are connected to urag, a structure-aware project index.
 
-Server tool names are short (search, fetch_unit, ...); harnesses expose them
-prefixed with the server name — e.g. urag_search, urag_fetch_unit.
+Tools are namespaced (urag_search, urag_fetch_unit, ...) so they never
+collide with other MCP servers. If your harness additionally prefixes MCP
+tools with the server name, they may appear as <server>_urag_search — call
+whatever name your harness exposes.
 
 Token-conscious workflow:
-1. If `status` reports no index, call `init_project` (or `init_project`
-   with embed=false for a fast lexical-only index) before searching.
-2. `search` with top_k=3-5 first. Results are compact records (signature,
-   summary, file:line). Prefer `mode=hybrid`; use `lexical` for exact
-   symbol/identifier lookups, `dense` for conceptual questions.
-3. Use `fetch_unit` (or `fetch_units` for several ids) only for the 1-3 most
-   relevant hits to get exact source spans. Never request whole files.
-4. Browse files and symbols without search: `list_files`, `list_symbols`,
-   `read_file`, `resolve` (exact definition), `children` (methods of a class).
-5. Ask impact questions precisely: `callers` (who calls X), `references`
-   (who uses/constructs/mentions X, including XAML markup), `callees` (what X
-   calls), `dependents` (what imports X), and `recent_changes` (git state).
-6. For dead-code hunts use `references` + `callers` per candidate, and
-   `dead_symbols` for a candidate list — then verify with grep before
-   removing anything. `index_now` re-syncs after files change; `status`
-   shows freshness.
+1. If `urag_status` reports no index, call `urag_init_project` (or
+   `urag_init_project` with embed=false for a fast lexical-only index)
+   before searching.
+2. `urag_search` with top_k=3-5 first. Results are compact records
+   (signature, summary, file:line). Prefer `mode=hybrid`; use `lexical` for
+   exact symbol/identifier lookups, `dense` for conceptual questions.
+3. Use `urag_fetch_unit` (or `urag_fetch_units` for several ids) only for
+   the 1-3 most relevant hits to get exact source spans. Never request
+   whole files.
+4. Browse files and symbols without search: `urag_list_files`,
+   `urag_list_symbols`, `urag_read_file`, `urag_resolve` (exact
+   definition), `urag_children` (methods of a class).
+5. Ask impact questions precisely: `urag_callers` (who calls X),
+   `urag_references` (who uses/constructs/mentions X, including XAML
+   markup), `urag_callees` (what X calls), `urag_dependents` (what imports
+   X), and `urag_recent_changes` (git state).
+6. For dead-code hunts use `urag_references` + `urag_callers` per
+   candidate, and `urag_dead_symbols` for a candidate list — then verify
+   with grep before removing anything. `urag_index_now` re-syncs after
+   files change; `urag_status` shows freshness.
 Filter by `language` when you know the stack (python, typescript, javascript).
 """
 
@@ -74,7 +80,7 @@ class IndexUnavailableError(RuntimeError):
 
 def _open(cfg: Config, create: bool = False, migrate: bool = False) -> Database:
     if not create and not cfg.db_path.is_file():
-        raise IndexUnavailableError("index missing; call init_project")
+        raise IndexUnavailableError("index missing; call urag_init_project")
     try:
         return Database(cfg.db_path, cfg.embedding.dimension, migrate=migrate)
     except (sqlite3.DatabaseError, RuntimeError) as exc:
@@ -171,7 +177,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     )
 
     @server.tool(
-        name="search",
+        name="urag_search",
         title="Search the project index",
         description=(
             "Search indexed symbols and docs. Returns compact records with "
@@ -215,7 +221,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="fetch_unit",
+        name="urag_fetch_unit",
         title="Fetch exact source span for a unit",
         description=(
             "Load the exact source lines (L2 evidence) for a unit id returned "
@@ -237,7 +243,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="fetch_units",
+        name="urag_fetch_units",
         title="Fetch exact source spans for several units",
         description=(
             "Batch version of fetch_unit: load exact source spans for a list "
@@ -264,7 +270,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="callers",
+        name="urag_callers",
         title="Find who calls a symbol",
         description=(
             "Exact call-graph lookup: returns the units that call `name`, "
@@ -297,7 +303,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="references",
+        name="urag_references",
         title="Find who references a symbol",
         description=(
             "Usage-site lookup: returns the units that reference `name` — "
@@ -332,7 +338,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="dead_symbols",
+        name="urag_dead_symbols",
         title="List candidate dead symbols",
         description=(
             "Heuristic dead-code candidates: symbol units (classes, methods, "
@@ -364,7 +370,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="resolve",
+        name="urag_resolve",
         title="Find a symbol definition by name",
         description=(
             "Fast exact-definition lookup by name or qualified name. Returns "
@@ -391,7 +397,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="callees",
+        name="urag_callees",
         title="Find what a unit calls",
         description=(
             "The inverse of callers: given a unit id, return every call site "
@@ -412,7 +418,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="dependents",
+        name="urag_dependents",
         title="Find what imports a module or symbol",
         description=(
             "Dependency lookup: return the files that import the given module "
@@ -431,7 +437,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="children",
+        name="urag_children",
         title="List the members of a unit",
         description=(
             "Structural navigation: list the child units of a unit id (e.g. "
@@ -459,7 +465,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="list_files",
+        name="urag_list_files",
         title="List indexed files",
         description=(
             "List all indexed files with language, kind, size, commit, and "
@@ -475,7 +481,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="list_symbols",
+        name="urag_list_symbols",
         title="List symbols in a file",
         description=(
             "List every indexed unit (symbols and doc chunks) in a file, with "
@@ -496,7 +502,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="read_file",
+        name="urag_read_file",
         title="Read a file (optionally a line range)",
         description=(
             "Read a file (or a line range) by project-relative path. Returns "
@@ -516,7 +522,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="recent_changes",
+        name="urag_recent_changes",
         title="Show recent git changes",
         description=(
             "Best-effort git state: current branch and HEAD, working-tree "
@@ -530,7 +536,7 @@ def create_server(root: Path | None = None) -> MCPServer:
         return json.dumps(result, ensure_ascii=False)
 
     @server.tool(
-        name="index_now",
+        name="urag_index_now",
         title="Re-index the project",
         description="Incrementally re-index changed files and embed new units.",
     )
@@ -552,7 +558,7 @@ def create_server(root: Path | None = None) -> MCPServer:
             return _error_response(exc)
 
     @server.tool(
-        name="status",
+        name="urag_status",
         title="Project index status",
         description="Index stats: files, units, embeddings, freshness, config.",
     )
@@ -582,14 +588,14 @@ def create_server(root: Path | None = None) -> MCPServer:
                 {
                     "root": str(cfg.project_root),
                     "error": str(exc),
-                    "next": "call init_project (optionally embed=false for a "
+                    "next": "call urag_init_project (optionally embed=false for a "
                     "fast lexical-only index) to build the index",
                 },
                 ensure_ascii=False,
             )
 
     @server.tool(
-        name="init_project",
+        name="urag_init_project",
         title="Initialize the project index",
         description=(
             "Set up .urag/ config and run a first full index. Call this when "

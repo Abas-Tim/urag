@@ -45,7 +45,6 @@ class Indexer:
         self.git = Git(self._root)
         self._head = self.git.head()
         self._changed_symbol_names: set[str] = set()
-        self._git_dirty: set[str] | None = None
         fingerprint = self.cfg.embedding.fingerprint()
         if self.db.get_meta("embedding_fingerprint") != fingerprint:
             self.db.clear_embeddings()
@@ -109,18 +108,10 @@ class Indexer:
         with _WRITE_LOCK:
             return self._index_all()
 
-    def _refresh_git_dirty(self) -> None:
-        if self._head and self.git.is_repo():
-            changed, _, untracked = self.git.working_paths()
-            self._git_dirty = changed | untracked
-        else:
-            self._git_dirty = None
-
     def _index_all(self) -> dict:
         start = time.monotonic()
         self._head = self.git.head(refresh=True)
         self._changed_symbol_names.clear()
-        self._refresh_git_dirty()
         files = self.discover()
         known = self.db.known_paths()
         current = {f.relative_to(self._root).as_posix() for f in files}
@@ -171,7 +162,6 @@ class Indexer:
         """Incremental re-index of specific paths (watcher)."""
         self._head = self.git.head(refresh=True)
         self._changed_symbol_names.clear()
-        self._refresh_git_dirty()
         changed: list[Path] = []
         deleted: list[str] = []
         for p in paths:
@@ -221,22 +211,15 @@ class Indexer:
             st = p.stat()
         except OSError:
             return False
-        rel = p.relative_to(self._root).as_posix()
         row = self.db.conn.execute(
             "SELECT size, mtime, sha256 FROM files WHERE path = ?",
-            (rel,),
+            (p.relative_to(self._root).as_posix(),),
         ).fetchone()
         if row is None:
             return True
-        if row["size"] != st.st_size or abs(row["mtime"] - st.st_mtime) > 1e-6:
-            return True
-        if self._git_dirty is None or rel in self._git_dirty:
-            try:
-                digest = hashlib.sha256(p.read_bytes()).hexdigest()
-            except OSError:
-                return False
-            return digest != row["sha256"]
-        return False
+        return (
+            row["size"] != st.st_size or abs(row["mtime"] - st.st_mtime) > 1e-6 or not row["sha256"]
+        )
 
     def _index_file(self, p: Path) -> int | None:
         rel = p.relative_to(self._root).as_posix()

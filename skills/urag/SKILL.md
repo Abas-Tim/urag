@@ -12,8 +12,8 @@ relevant repository context, then reason from the returned evidence.
 
 Search first, fetch evidence second:
 
-1. Check that the project has an index with `status`.
-2. If no index exists, initialize it with `init_project` or
+1. Check that the project has an index with `urag_status`.
+2. If no index exists, initialize it with `urag_init_project` or
    `urag init --root <root> --full`.
 3. Search with `top_k=3-5` first. Prefer compact results over source dumps.
 4. Use the returned file and line range to identify the most relevant units.
@@ -49,8 +49,8 @@ keeps an existing index updated through debounced filesystem events. A first
 full index can take minutes (local CPU embeddings). If it is interrupted, just
 run `urag index` again — it resumes where it stopped.
 
-Use `--json` for machine-readable output from `search`, `callers`,
-`references`, `read`, `status`, and `doctor`. Use `search --evidence` for
+Use `--json` for machine-readable output from `urag_search`, `urag_callers`,
+`urag_references`, `read`, `urag_status`, and `doctor`. Use `search --evidence` for
 trimmed source spans, or `get <unit-id>` for the full current source span.
 
 ## Search Modes
@@ -86,7 +86,7 @@ urag callers parse_token --root <root>
 urag callers parse_token --root <root> --depth 3
 ```
 
-The MCP `callers` tool has the same behavior with `name`, `limit`, and `depth`.
+The MCP `urag_callers` tool has the same behavior with `name`, `limit`, and `depth`.
 Depth 1 returns direct callers. Larger depths perform breadth-first traversal,
 return the shortest `hop` for each result, and terminate safely on cycles.
 
@@ -104,7 +104,7 @@ complete runtime dependency graph.
 
 ## References And Dead Code
 
-`search` and `resolve` find *declarations*; the call graph finds *calls*.
+`urag_search` and `urag_resolve` find *declarations*; the call graph finds *calls*.
 Neither covers usage sites like `new X()`, field/parameter/return types,
 base classes, casts, attributes, or XAML bindings. Use the reference index
 for "who uses X" and dead-code analysis:
@@ -120,7 +120,7 @@ urag deadcode --root <root>
   XAML markup (element tags, `x:Class`, `DataType`, `{x:Static}`,
   `{StaticResource}`, event handler attributes). Each result carries the
   reference line and its `ref_kind`.
-- `callers` also matches constructions (`new MainWindow()`).
+- `urag_callers` also matches constructions (`new MainWindow()`).
 - `deadcode` lists *candidate* dead symbols: units with no incoming calls
   and no incoming references (imports, config keys, and test paths are
   excluded). It is a heuristic: dynamic dispatch, reflection, markup
@@ -129,7 +129,7 @@ urag deadcode --root <root>
 
 For a dead-code hunt, the reliable workflow is:
 
-1. `urag deadcode` (or MCP `dead_symbols`) for the candidate list.
+1. `urag deadcode` (or MCP `urag_dead_symbols`) for the candidate list.
 2. `urag references <symbol>` + `urag callers <symbol>` per candidate.
 3. Verify each candidate with `git grep` (raw text, whole repo, including
    markup files) before removing anything.
@@ -144,49 +144,49 @@ urag mcp --root <root>
 
 The server exposes these tools:
 
-> Server tool names are intentionally short. Agent harnesses expose them
-> prefixed with the server name — e.g. `urag_search`, `urag_fetch_unit`,
-> `urag_callers`, `urag_index_now`. Use the prefixed names when calling
-> through a harness; the bare names below are the server-level identifiers.
+> Tool names are namespaced with a `urag_` prefix so they never collide
+> with other MCP servers. If your harness additionally prefixes MCP tools
+> with the server name, they may appear as `<server>_urag_search` — call
+> whatever name your harness exposes.
 
-- `search(query, top_k?, mode?, language?, include_evidence?, query_class?)`
+- `urag_search(query, top_k?, mode?, language?, include_evidence?, query_class?)`
   returns compact packets with metadata, ranks, provenance, and optional
   trimmed evidence. The evidence budget is split across results, not applied
   per result.
-- `fetch_unit(unit_id)` returns the exact source span, file, line range,
+- `urag_fetch_unit(unit_id)` returns the exact source span, file, line range,
   symbol metadata, indexed commit, and a stale status.
-- `fetch_units(unit_ids[], max_tokens?)` fetches several units in one call.
-- `callers(name, limit?, depth?)` returns direct or multi-hop caller packets.
-- `references(name, limit?, depth?)` returns who uses/constructs/mentions a
+- `urag_fetch_units(unit_ids[], max_tokens?)` fetches several units in one call.
+- `urag_callers(name, limit?, depth?)` returns direct or multi-hop caller packets.
+- `urag_references(name, limit?, depth?)` returns who uses/constructs/mentions a
   symbol, including XAML markup. Each result carries the site line and its
   `ref_kind`. Depth > 1 walks referencers-of-referencers.
-- `dead_symbols(limit?, language?)` lists heuristic dead-code candidates
+- `urag_dead_symbols(limit?, language?)` lists heuristic dead-code candidates
   (no incoming calls or references). Verify with grep before removing.
-- `callees(unit_id)` returns what a unit calls (the inverse of callers).
-- `dependents(target, limit?)` returns the files that import a module/symbol.
-- `resolve(name, limit?)` returns exact symbol definitions by name/qualname.
-- `children(unit_id, include_siblings?)` lists the members of a class/struct.
-- `list_files(language?)` lists indexed files with language and unit counts.
-- `list_symbols(file)` lists every indexed unit in a file.
-- `read_file(path, start?, end?)` reads a file or a line range by path.
-- `recent_changes(limit?)` reports git branch, HEAD, working-tree changes, and
+- `urag_callees(unit_id)` returns what a unit calls (the inverse of callers).
+- `urag_dependents(target, limit?)` returns the files that import a module/symbol.
+- `urag_resolve(name, limit?)` returns exact symbol definitions by name/qualname.
+- `urag_children(unit_id, include_siblings?)` lists the members of a class/struct.
+- `urag_list_files(language?)` lists indexed files with language and unit counts.
+- `urag_list_symbols(file)` lists every indexed unit in a file.
+- `urag_read_file(path, start?, end?)` reads a file or a line range by path.
+- `urag_recent_changes(limit?)` reports git branch, HEAD, working-tree changes, and
   recent commits with their files.
-- `index_now()` incrementally re-indexes changed files and reports statistics.
-- `status()` reports the project root, files, units, embeddings, languages,
+- `urag_index_now()` incrementally re-indexes changed files and reports statistics.
+- `urag_status()` reports the project root, files, units, embeddings, languages,
   provider, model, git branch/HEAD, and last index time.
-- `init_project(embed?)` creates and populates the project index. Pass
+- `urag_init_project(embed?)` creates and populates the project index. Pass
   `embed=false` for a fast lexical-only index without a model download.
 
 When using MCP, search with `top_k=3-5`, fetch only the most relevant one to
-three units, and call `index_now` after changes. Use `resolve` for a known
-symbol, `list_symbols` + `read_file` to browse files, and `callers`/`callees`/
-`dependents` for impact questions.
+three units, and call `urag_index_now` after changes. Use `urag_resolve` for a
+known symbol, `urag_list_symbols` + `urag_read_file` to browse files, and
+`urag_callers`/`urag_callees`/`urag_dependents` for impact questions.
 
 ## Result Fields
 
 Search packets commonly include:
 
-- `id`: Unit id used by `fetch_unit` or `urag get`.
+- `id`: Unit id used by `urag_fetch_unit` or `urag get`.
 - `qualname`, `type`, `signature`, and `summary`: Symbol or document metadata.
 - `kind`, `concepts`, `relationships`, and `parent_id`: Structural context.
 - `file` and `lines`: Repository location.

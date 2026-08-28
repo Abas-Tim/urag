@@ -2,26 +2,27 @@
 
 ## Unreleased
 
+- MCP tools renamed with a `urag_` namespace (`urag_search`,
+  `urag_fetch_unit`, `urag_callers`, ...) so they never collide with other
+  servers; instructions and the skill doc updated. If a harness adds its own
+  server-name prefix, the names appear as `<server>_urag_*`.
+- Incremental indexing no longer re-hashes files whose size+mtime match
+  the stored values (any repo kind). Same-size-same-mtime content edits are
+  intentionally not detected by plain re-index runs; the file watcher and
+  `--full`-style rebuilds still pick up real edits. Legacy rows without a
+  stored hash are re-indexed once to backfill.
+- Retrieval precision: definition queries now ignore ~90 common English
+  words as exact symbol identifiers (user, count, code, file, test, change,
+  find, ...), reducing false-positive exact-match boosts.
 - Module structure: the call-graph/reference queries moved to
   `db_edges.py`, search/navigation queries to `db_search.py` (mixins over
   the storage core), and the native-language extractors split into
   per-language modules (`go_ext`, `rust_ext`, `java_ext`, `c_ext`,
   `csharp_ext`) with shared helpers in `native_common`; `native_ext` remains
   as a compatibility re-export. Public imports are unchanged.
-- Incremental indexing in git repos no longer re-hashes files whose
-  size+mtime match and whose working-tree content is clean vs HEAD
-  (untracked/modified files still get content-verified). Non-git repos keep
-  the exact-hash behavior.
 - CLI: `read`, `status`, and `doctor` now support `--json` machine-readable
   output; `doctor --json` reports a structured health payload and exits
   non-zero on failure.
-- Retrieval precision: definition queries no longer treat common English
-  words (user, count, code, file, test, ...) as exact symbol identifiers,
-  which reduces false-positive exact-match boosts.
-- MCP: documented the tool-naming contract — server tools are short names
-  (`search`, `fetch_unit`, ...) and agent harnesses expose them prefixed
-  with the server name (e.g. `urag_search`); instructions updated in the
-  server and the skill doc.
 - Fixed a destructive read path: opening an index whose stored vector
   dimension differs from `embedding.dimension` now raises a clear error
   instead of silently dropping all embeddings; the rebuild only happens on

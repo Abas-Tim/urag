@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0a1 - 2026-08-28
+## 0.2.0 - 2026-08-28
 
 - MCP tools renamed with a `urag_` namespace (`urag_search`,
   `urag_fetch_unit`, `urag_callers`, ...) so they never collide with other

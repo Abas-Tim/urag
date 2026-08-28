@@ -3,16 +3,28 @@
 urag publishes two kinds of releases to PyPI:
 
 - **Stable releases** (`vX.Y.Z`) — the default for `pip install urag-cli`.
-- **Pre-releases** (`vX.Y.ZaN` / `vX.Y.ZrcN`) — opt-in for testers. PyPI
-  accepts them, but installers exclude pre-releases by default, so a
-  pre-release never shadows the latest stable version.
+- **Pre-releases** — opt-in for testers. PyPI accepts them, but installers
+  exclude pre-releases by default, so a pre-release never shadows the latest
+  stable version.
 
-Both flows use the same `publish` workflow (`.github/workflows/publish.yml`),
-which builds the wheel + sdist, uploads them to PyPI, and attaches the
-artifacts to a GitHub release (flagged "pre-release" when the tag contains
-an `a`/`b`/`rc`/`dev` segment). The workflow verifies that the tag, the
-`[project] version` in `pyproject.toml`, and `__version__` in
-`src/urag/__init__.py` all agree, so a mismatch can never publish.
+Pre-releases come in two flavors:
+
+- **Automatic dev pre-releases** (`X.Y.Z.devN`) — published on every push to
+  `main` by the `dev-publish` workflow. The version is derived at build time:
+  next patch of the latest stable tag plus the commit count since that tag
+  (e.g. `v0.2.0` + 3 commits -> `0.2.1.dev3`). No tags or version bumps are
+  needed; install with `pip install --pre urag-cli` to get the latest merged
+  state. Release-prep commits (`chore(release): ...`) are skipped.
+- **Manual alpha/rc pre-releases** (`vX.Y.ZaN` / `vX.Y.ZrcN`) — tagged
+  releases for a specific change set, e.g. when a PR branch should be
+  testable before merge. See below.
+
+Both use the same `publish` workflow for tagged releases, which builds the
+wheel + sdist, uploads them to PyPI, and attaches the artifacts to a GitHub
+release (flagged "pre-release" when the tag contains an `a`/`b`/`rc`/`dev`
+segment). The workflow verifies that the tag, the `[project] version` in
+`pyproject.toml`, and `__version__` in `src/urag/__init__.py` all agree, so
+a mismatch can never publish.
 
 ## Prerequisites
 

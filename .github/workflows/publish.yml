@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "tag to publish (e.g. v0.2.0a1)"
+        required: true
 
 permissions:
   contents: write
@@ -13,9 +17,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: false
+      - name: Resolve tag
+        id: tag
+        run: echo "name=${{ github.event.inputs.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      - name: Check version consistency
+        run: python scripts/check_version.py "${{ steps.tag.outputs.name }}"
+      - name: Detect pre-release
+        id: rel
+        run: |
+          if [[ "${{ steps.tag.outputs.name }}" =~ ^v[0-9]+(\.[0-9]+)*[-.](a|b|rc|alpha|beta|preview|dev)([-.]?[0-9]+)?$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build wheel + sdist
         run: uv build
       - name: Publish to PyPI
@@ -25,6 +44,7 @@ jobs:
       - name: Attach artifacts to release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ steps.rel.outputs.prerelease }}
           files: |
             dist/*.whl
             dist/*.tar.gz

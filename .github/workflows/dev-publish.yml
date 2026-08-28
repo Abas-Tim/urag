@@ -27,6 +27,11 @@ jobs:
         env:
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "SKIP: dev releases only publish from main" >&2
+            echo "version=SKIP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           VER=$(python scripts/dev_version.py | tail -n1)
           echo "version=$VER" >> "$GITHUB_OUTPUT"
       - name: Build wheel + sdist

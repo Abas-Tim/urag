@@ -10,6 +10,50 @@ import re
 
 from .models import Unit
 
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_CONFIG_HINT = frozenset(
+    {
+        "config",
+        "configs",
+        "configuration",
+        "configure",
+        "configured",
+        "setting",
+        "settings",
+        "env",
+        "environment",
+        "toml",
+        "yaml",
+        "yml",
+        "json",
+        "ini",
+        "key",
+        "keys",
+    }
+)
+_IMPORT_HINT = frozenset(
+    {
+        "import",
+        "imports",
+        "imported",
+        "dependency",
+        "dependencies",
+        "dependents",
+        "module",
+        "modules",
+        "package",
+        "packages",
+        "require",
+        "requires",
+        "requirements",
+    }
+)
+
+
+def _query_terms(text: str) -> set[str]:
+    """Approximate FTS5 unicode61 tokens: casefolded word chars without `_`."""
+    return {t for t in _TOKEN_RE.findall(text.casefold()) if len(t) > 1}
+
 
 class _SearchMixin:
     # ---------- retrieval ----------
@@ -29,6 +73,7 @@ class _SearchMixin:
         if exact:
             exact_filter = "AND (u.name = ? OR u.qualname = ? OR f.path = ?)"
             exact_params = (query.strip(), query.strip(), query.strip())
+        fetch = limit if exact else max(limit * 4, limit + 10)
         rows = self.conn.execute(
             f"""
             SELECT u.*, f.path,
@@ -40,9 +85,56 @@ class _SearchMixin:
             ORDER BY score
             LIMIT ?
             """,
-            (q, language or "", language or "", *exact_params, limit),
+            (q, language or "", language or "", *exact_params, fetch),
         ).fetchall()
-        return [(self._row_to_unit(r), r["path"], r["score"]) for r in rows]
+        hits = [(self._row_to_unit(r), r["path"], r["score"]) for r in rows]
+        return self._rank_lexical(query, hits, limit, exact=exact)
+
+    @staticmethod
+    def _rank_lexical(
+        query: str,
+        hits: list[tuple[Unit, str, float]],
+        limit: int,
+        exact: bool = False,
+    ) -> list[tuple[Unit, str, float]]:
+        """Reorder lexical candidates by intent and multi-term agreement.
+
+        Units matching more distinct query terms rank first; config-key and
+        import units are demoted unless the query asks for them; for longer
+        queries, single-term matches are dropped when multi-term matches
+        exist. The caller's bm25 order breaks ties."""
+        if exact or len(hits) < 2:
+            return hits[:limit]
+        terms = _query_terms(query)
+        if len(terms) < 2:
+            return hits[:limit]
+        config_intent = bool(terms & _CONFIG_HINT)
+        import_intent = bool(terms & _IMPORT_HINT)
+        scored: list[tuple[int, int, float, Unit, str]] = []
+        for unit, path, score in hits:
+            text = "\n".join(
+                part
+                for part in (
+                    unit.name,
+                    unit.qualname,
+                    unit.signature,
+                    unit.summary,
+                    unit.concepts,
+                    unit.relationships,
+                )
+                if part
+            )
+            matched = len(terms & _query_terms(text))
+            demoted = (unit.unit_type == "config_key" and not config_intent) or (
+                unit.unit_type == "import" and not import_intent
+            )
+            scored.append((-matched, 1 if demoted else 0, score, unit, path))
+        if len(terms) >= 4:
+            strong = [entry for entry in scored if entry[0] <= -2]
+            if strong:
+                scored = strong
+        scored.sort(key=lambda entry: entry[:3])
+        return [(unit, path, score) for _m, _pen, score, unit, path in scored[:limit]]
 
     @staticmethod
     def _safe_fts(query: str) -> str:
@@ -105,9 +197,7 @@ class _SearchMixin:
         return [dict(r) for r in self.conn.execute(q, params).fetchall()]
 
     def file_by_path(self, path: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM files WHERE path = ?", (path,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM files WHERE path = ?", (path,)).fetchone()
         return dict(row) if row else None
 
     def units_by_file_path(self, path: str) -> list[Unit]:
@@ -160,9 +250,7 @@ class _SearchMixin:
         return [self._row_to_unit(r) for r in rows]
 
     def siblings_of(self, unit_id: int) -> list[Unit]:
-        row = self.conn.execute(
-            "SELECT parent_id FROM units WHERE id = ?", (unit_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT parent_id FROM units WHERE id = ?", (unit_id,)).fetchone()
         if row is None or row["parent_id"] is None:
             return []
         return self.children_of(row["parent_id"])
@@ -204,4 +292,3 @@ class _SearchMixin:
             if key not in out or out[key]["unit_id"] is None:
                 out.setdefault(key, dict(r))
         return list(out.values())[:limit]
-

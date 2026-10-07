@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+- Retrieval transparency: search responses now report `mode_requested`
+  (what the caller asked for), the effective `mode`, `dense_ready`, and a
+  `fallback` reason. Hybrid requests on a lexical-only index (provider
+  `none` or no embeddings) run lexical search and say so instead of
+  silently returning lexical results labeled `hybrid`.
+- Fixed multi-word queries misclassified as exact symbol lookups (e.g. a
+  query starting with `P7` or `GPU`), which exact-filtered the full phrase
+  and returned zero results; exact symbol searches now fall back to broader
+  lexical terms when nothing matches exactly.
+- `urag_status` / MCP `urag_status` report dense readiness
+  (`dense_ready`, `dense_note`), and `urag search` prints the fallback
+  reason when one applies.
+- `urag doctor` now includes a coverage report: files present on disk are
+  classified as indexed, excluded, unsupported extension (e.g. `.ps1`,
+  `.comp`), language-disabled, too large, or not indexed yet, with examples
+  and top unsupported extensions.
+- Lexical ranking is now intent-sensitive: units matching more distinct
+  query terms rank first, single-term matches are dropped for longer
+  queries when multi-term matches exist, and `config_key`/`import` units
+  are demoted unless the query asks about config or imports. Q&A queries
+  no longer surface MCP command entries and import declarations above
+  implementation units.
+- Provenance is explicit: search results carry `indexed_commit` (source
+  attribution) and `stale_basis` (`sha256` content hash vs `git-diff`
+  commit membership), and search responses include the current `head`.
+  `fetch_unit`/`callees` also report the freshness basis. An unchanged file
+  with an older indexing commit is correctly `stale: false`.
+- Skill and MCP instructions now route known identifiers to `resolve`,
+  impact questions to `callers`/`references`/`dependents`, and broad
+  questions to multiple focused searches.
+
 ## 0.2.0 - 2026-08-28
 
 - MCP tools renamed with a `urag_` namespace (`urag_search`,

@@ -39,13 +39,18 @@ Token-conscious workflow:
    before searching.
 2. `urag_search` with top_k=3-5 first. Results are compact records
    (signature, summary, file:line). Prefer `mode=hybrid`; use `lexical` for
-   exact symbol/identifier lookups, `dense` for conceptual questions.
+   exact symbol/identifier lookups, `dense` for conceptual questions. Check
+   `dense_ready` and `fallback` in the response: when `fallback` is set,
+   dense/semantic retrieval did not run and the results are lexical-only
+   (or the query class was rerouted).
 3. Use `urag_fetch_unit` (or `urag_fetch_units` for several ids) only for
    the 1-3 most relevant hits to get exact source spans. Never request
    whole files.
 4. Browse files and symbols without search: `urag_list_files`,
    `urag_list_symbols`, `urag_read_file`, `urag_resolve` (exact
-   definition), `urag_children` (methods of a class).
+   definition), `urag_children` (methods of a class). For a known
+   identifier prefer `urag_resolve` over search, and split broad
+   multi-part questions into focused searches.
 5. Ask impact questions precisely: `urag_callers` (who calls X),
    `urag_references` (who uses/constructs/mentions X, including XAML
    markup), `urag_callees` (what X calls), `urag_dependents` (what imports
@@ -120,7 +125,9 @@ def _packet(r, include_evidence: bool, db: Database, budget: int) -> dict:
         "score": round(r.score, 4),
         "ranks": {"lexical": r.lexical_rank, "dense": r.dense_rank},
         "commit": r.commit,
+        "indexed_commit": r.commit,
         "stale": r.stale,
+        "stale_basis": r.stale_basis,
     }
     if r.caller_of:
         packet["calls"] = r.caller_of
@@ -160,6 +167,7 @@ def _unit_meta(db: Database, unit_id: int) -> dict | None:
         "file": path,
         "lines": [u.start_line, u.end_line],
         "commit": commit,
+        "indexed_commit": commit,
     }
 
 
@@ -210,8 +218,12 @@ def create_server(root: Path | None = None) -> MCPServer:
                     {
                         "query": query,
                         "mode": result.mode,
+                        "mode_requested": result.mode_requested or result.mode,
                         "class": result.query_class,
                         "budget_tokens": result.budget_tokens,
+                        "dense_ready": result.dense_ready,
+                        "fallback": result.fallback,
+                        "head": result.head,
                         "count": len(packets),
                         "results": packets,
                     },
@@ -226,7 +238,7 @@ def create_server(root: Path | None = None) -> MCPServer:
         description=(
             "Load the exact source lines (L2 evidence) for a unit id returned "
             "by search. Prefer this over reading whole files. Includes the "
-            "commit the unit was indexed at and a stale flag."
+            "indexed commit, a stale flag, and its freshness basis."
         ),
     )
     def fetch_unit(unit_id: int) -> str:
@@ -566,12 +578,24 @@ def create_server(root: Path | None = None) -> MCPServer:
         try:
             with _database(cfg) as db:
                 s = db.stats()
+                dense_ready = s.embedded > 0 and cfg.embedding.provider != "none"
+                if dense_ready:
+                    dense_note = ""
+                elif cfg.embedding.provider == "none":
+                    dense_note = "lexical-only: embedding provider is 'none'"
+                else:
+                    dense_note = (
+                        "lexical-only: no embeddings indexed yet; run urag_index_now "
+                        "with an embedding provider"
+                    )
                 return json.dumps(
                     {
                         "root": str(cfg.project_root),
                         "files": s.files,
                         "units": s.units,
                         "embedded": s.embedded,
+                        "dense_ready": dense_ready,
+                        "dense_note": dense_note,
                         "by_language": s.by_language,
                         "last_indexed": s.last_indexed,
                         "provider": cfg.embedding.provider,

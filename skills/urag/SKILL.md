@@ -24,6 +24,16 @@ Search first, fetch evidence second:
 
 Do not read whole files when search results and unit evidence are sufficient.
 
+## Tool Routing
+
+- Known symbol or identifier? Start with `urag_resolve` (exact definition),
+  not a long search.
+- "What calls/uses X" or change impact? Use `urag_callers` / `urag_references`
+  / `urag_dependents` directly; do not phrase them as broad searches.
+- Broad or multi-part question? Split it into focused searches. Long mixed
+  queries dilute lexical ranking; several short ones retrieve better.
+- Browsing a known file? Use `urag_list_symbols` + `urag_read_file`.
+
 ## CLI
 
 ```bash
@@ -75,6 +85,16 @@ Use `urag classify "<query>"` to inspect the selected class. Exact symbol
 queries use lexical retrieval. Impact queries use the call graph when a target
 symbol can be extracted. The configured `max_evidence_tokens` value is a
 global ceiling and may reduce the class budget.
+
+Search responses report the requested and effective mode:
+
+- `mode_requested`: what the call asked for (`hybrid` by default).
+- `mode`: what actually ran (`lexical`, `dense`, `definitions`, `calls`, ...).
+- `dense_ready`: false when no embeddings are available, so no semantic
+  retrieval could run.
+- `fallback`: the reason for any downgrade (lexical-only index, exact symbol
+  miss, or query-class routing). When set, treat the results as lexical
+  unless stated otherwise.
 
 ## Call Graph
 
@@ -152,7 +172,9 @@ The server exposes these tools:
 - `urag_search(query, top_k?, mode?, language?, include_evidence?, query_class?)`
   returns compact packets with metadata, ranks, provenance, and optional
   trimmed evidence. The evidence budget is split across results, not applied
-  per result.
+  per result. The response carries `mode_requested`, `mode`, `dense_ready`,
+  and `fallback` so lexical-only answers are distinguishable from semantic
+  ones.
 - `urag_fetch_unit(unit_id)` returns the exact source span, file, line range,
   symbol metadata, indexed commit, and a stale status.
 - `urag_fetch_units(unit_ids[], max_tokens?)` fetches several units in one call.
@@ -173,7 +195,8 @@ The server exposes these tools:
   recent commits with their files.
 - `urag_index_now()` incrementally re-indexes changed files and reports statistics.
 - `urag_status()` reports the project root, files, units, embeddings, languages,
-  provider, model, git branch/HEAD, and last index time.
+  provider, model, git branch/HEAD, last index time, and whether dense
+  retrieval is ready (`dense_ready`, `dense_note`).
 - `urag_init_project(embed?)` creates and populates the project index. Pass
   `embed=false` for a fast lexical-only index without a model download.
 
@@ -190,8 +213,17 @@ Search packets commonly include:
 - `qualname`, `type`, `signature`, and `summary`: Symbol or document metadata.
 - `kind`, `concepts`, `relationships`, and `parent_id`: Structural context.
 - `file` and `lines`: Repository location.
-- `score` and `ranks`: Retrieval score and lexical/dense ranks.
-- `commit` and `stale`: Git provenance when available.
+- `score` and `ranks`: Retrieval score and lexical/dense ranks. Long queries
+  are reranked so units matching more query terms come first, and config-key
+  or import units are demoted unless the query asks for them.
+- `commit` / `indexed_commit`: the commit the file was indexed at (source
+  attribution), not current HEAD.
+- `stale` and `stale_basis`: whether the file changed since indexing.
+  `stale_basis: "sha256"` means freshness is content-hash equality;
+  `"git-diff"` means it fell back to commit membership.
+- The search response's `head` is the current repository HEAD. A `commit`
+  older than `head` together with `stale: false` means the file content is
+  unchanged; it was not relabeled stale just because HEAD advanced.
 - `calls`, `call_line`, `hop`, and `resolved_to`: Call-graph metadata when
   applicable.
 

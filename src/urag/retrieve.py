@@ -33,13 +33,21 @@ class SearchResult:
     query: str
     query_class: str = "local"
     budget_tokens: int = 1500
+    mode_requested: str = ""
+    dense_ready: bool = False
+    fallback: str = ""
+    head: str = ""
 
     def to_dict(self) -> dict:
         return {
             "query": self.query,
             "mode": self.mode,
+            "mode_requested": self.mode_requested or self.mode,
             "class": self.query_class,
             "budget_tokens": self.budget_tokens,
+            "dense_ready": self.dense_ready,
+            "fallback": self.fallback,
+            "head": self.head,
             "count": len(self.results),
             "results": [r.to_dict() for r in self.results],
         }
@@ -267,6 +275,29 @@ class Retriever:
                 stale[path] = bool(row["commit"] and path in self._changed_since(row["commit"]))
         return stale
 
+    def _dense_status(self) -> str | None:
+        """Reason dense retrieval is unavailable, or None when it can run."""
+        if getattr(self.embedder, "dimension", 0) <= 0:
+            provider = getattr(getattr(self.cfg, "embedding", None), "provider", "")
+            label = f"embedding provider is {provider!r}" if provider else "embeddings are disabled"
+            return f"dense unavailable: {label} (lexical-only index)"
+        conn = getattr(self.db, "conn", None)
+        if conn is None:
+            return None
+        row = conn.execute("SELECT 1 FROM vec_units LIMIT 1").fetchone()
+        if row is None:
+            return (
+                "dense unavailable: index has no embeddings yet "
+                "(run `urag index` with an embedding provider)"
+            )
+        return None
+
+    def _head(self) -> str:
+        """Current git HEAD, or '' outside a git repository."""
+        if not self.git:
+            return ""
+        return self.git.head() or ""
+
     def search(
         self,
         query: str,
@@ -284,6 +315,11 @@ class Retriever:
         if top_k is None and rc.default_top_k > 0:
             default_k = min(default_k, rc.default_top_k)
         k = top_k if top_k is not None else default_k
+        requested_mode = mode or "hybrid"
+        dense_reason = self._dense_status()
+        dense_ready = dense_reason is None
+        fallbacks: list[str] = []
+        head = self._head()
         if mode == "hybrid":
             target = self._definition_symbol(query)
             if target:
@@ -292,7 +328,16 @@ class Retriever:
                     results = [RetrievedUnit(unit, path, score=1.0) for unit, path, _commit in hits]
                     results = self._limit_results(results, k)
                     self._enrich(results)
-                    return SearchResult(results, "definitions", query, qc, budget)
+                    return SearchResult(
+                        results,
+                        "definitions",
+                        query,
+                        qc,
+                        budget,
+                        requested_mode,
+                        dense_ready,
+                        head=head,
+                    )
         if qc == "impact":
             target = self._impact_symbol(query)
             if target:
@@ -347,32 +392,74 @@ class Retriever:
                     ]
                     results = self._limit_results(results, k)
                     self._enrich(results)
-                    return SearchResult(results, "calls", query, qc, budget)
+                    return SearchResult(
+                        results,
+                        "calls",
+                        query,
+                        qc,
+                        budget,
+                        requested_mode,
+                        dense_ready,
+                        head=head,
+                    )
         if mode == "hybrid":
-            mode = MODE_BY_CLASS.get(qc, mode)
+            routed = MODE_BY_CLASS.get(qc, mode)
+            if routed != mode:
+                fallbacks.append(f"query class '{qc}' routed to {routed} search")
+            mode = routed
         mode = mode or MODE_BY_CLASS.get(qc, "hybrid")
+        if mode == "hybrid" and not dense_ready:
+            fallbacks.append(dense_reason or "dense unavailable")
+            mode = "lexical"
         if mode == "lexical":
-            hits = self.db.lexical_search(
-                query, rc.lexical_candidates, language, exact=qc == "symbol"
-            )
+            exact = qc == "symbol"
+            hits = self.db.lexical_search(query, rc.lexical_candidates, language, exact=exact)
+            if not hits and exact:
+                hits = self.db.lexical_search(query, rc.lexical_candidates, language, exact=False)
+                if hits:
+                    fallbacks.append("exact symbol match not found; used broader lexical terms")
             results = [RetrievedUnit(u, path, score=s) for u, path, s in hits]
         elif mode == "dense":
+            if not dense_ready:
+                return SearchResult(
+                    [],
+                    "dense",
+                    query,
+                    qc,
+                    budget,
+                    requested_mode,
+                    False,
+                    dense_reason or "dense unavailable",
+                    head,
+                )
             try:
                 qvec = self.embedder.embed_query(query)
-            except RuntimeError:
-                return SearchResult([], "dense", query, qc, budget)
+            except RuntimeError as exc:
+                return SearchResult(
+                    [],
+                    "dense",
+                    query,
+                    qc,
+                    budget,
+                    requested_mode,
+                    False,
+                    f"dense query failed: {exc}",
+                    head,
+                )
             hits = self.db.dense_search(qvec, rc.dense_candidates, language)
             results = [RetrievedUnit(u, path, score=-s) for u, path, s in hits]
         else:
             lists: list[list[tuple[int, float]]] = []
             lexical = self.db.lexical_search(query, rc.lexical_candidates, language)
             lists.append([(u.id or 0, s) for u, _p, s in lexical])
+            dense: list[tuple[Unit, str, float]] = []
             try:
                 qvec = self.embedder.embed_query(query)
                 dense = self.db.dense_search(qvec, rc.dense_candidates, language)
                 lists.append([(u.id or 0, s) for u, _p, s in dense])
-            except RuntimeError:
-                dense = []
+            except RuntimeError as exc:
+                fallbacks.append(f"dense query failed: {exc}")
+                dense_ready = False
             fused = _rrf_scores(lists, rc.rrf_k, weights=[rc.lexical_weight, rc.dense_weight])
             exact_ids = _exact_symbol_ids(query, lexical)
             exact_bonus = rc.exact_symbol_weight / (rc.rrf_k + 1)
@@ -401,7 +488,17 @@ class Retriever:
         results = self._limit_results(results, k)
         stale = self._stale_map([r.file_path for r in results])
         self._enrich(results, stale)
-        return SearchResult(results, mode, query, qc, budget)
+        return SearchResult(
+            results,
+            mode,
+            query,
+            qc,
+            budget,
+            requested_mode,
+            dense_ready,
+            "; ".join(fallbacks),
+            head,
+        )
 
     def _limit_results(self, results: list[RetrievedUnit], limit: int) -> list[RetrievedUnit]:
         per_file: dict[str, int] = {}
@@ -419,14 +516,35 @@ class Retriever:
                 break
         return selected
 
+    def _basis_for(self, path: str) -> str:
+        """How freshness was decided for a path: sha256, git-diff, or unknown."""
+        row = self.db.conn.execute(
+            'SELECT sha256, "commit" FROM files WHERE path = ?', (path,)
+        ).fetchone()
+        if row is None:
+            return "missing"
+        if row["sha256"]:
+            return "sha256"
+        if row["commit"]:
+            return "git-diff"
+        return "unknown"
+
     def _enrich(self, results: list[RetrievedUnit], stale: dict[str, bool] | None = None) -> None:
-        """Attach commit + staleness to results."""
-        stale = stale or self._stale_map([r.file_path for r in results])
+        """Attach indexing commit, staleness, and freshness basis to results."""
+        stale = stale if stale is not None else self._stale_map([r.file_path for r in results])
         for r in results:
             row = self.db.conn.execute(
-                'SELECT "commit" FROM files WHERE path = ?', (r.file_path,)
+                'SELECT sha256, "commit" FROM files WHERE path = ?', (r.file_path,)
             ).fetchone()
             r.commit = row["commit"] if row else ""
+            if row is None:
+                r.stale_basis = "missing"
+            elif row["sha256"]:
+                r.stale_basis = "sha256"
+            elif row["commit"]:
+                r.stale_basis = "git-diff"
+            else:
+                r.stale_basis = "unknown"
             r.stale = stale.get(r.file_path, False)
 
     @staticmethod
@@ -678,6 +796,7 @@ class Retriever:
         ev = self.db.load_evidence(unit_id)
         if ev and ev.get("file"):
             ev["stale"] = self._stale_map([ev["file"]]).get(ev["file"], True)
+            ev["stale_basis"] = self._basis_for(ev["file"])
         return ev
 
     def get_many(self, unit_ids: list[int], max_tokens: int | None = None) -> list[dict]:
@@ -688,6 +807,7 @@ class Retriever:
             if not ev:
                 continue
             ev["stale"] = self._stale_map([ev["file"]]).get(ev["file"], True)
+            ev["stale_basis"] = self._basis_for(ev["file"])
             if max_tokens and "span" in ev:
                 ev["span"] = fit_evidence(ev["span"], max_tokens)
             out.append(ev)
@@ -702,13 +822,14 @@ class Retriever:
         commit: str = "",
         stale: dict[str, bool] | None = None,
     ) -> RetrievedUnit:
-        stale = stale or self._stale_map([path])
+        stale = stale if stale is not None else self._stale_map([path])
         return RetrievedUnit(
             unit,
             path,
             score=1.0,
             commit=commit,
             stale=stale.get(path, False),
+            stale_basis=self._basis_for(path),
         )
 
     def resolve(self, name: str, limit: int = 10) -> SearchResult:
@@ -716,8 +837,7 @@ class Retriever:
         hits = self.db.resolve_units(name, limit=limit)
         results = [self._retrieved(u, p, c) for u, p, c in hits]
         stale = self._stale_map([r.file_path for r in results])
-        for r in results:
-            r.stale = stale.get(r.file_path, False)
+        self._enrich(results, stale)
         return SearchResult(
             results,
             "resolve",
@@ -744,8 +864,7 @@ class Retriever:
                 )
             )
         stale = self._stale_map([r.file_path for r in results])
-        for r in results:
-            r.stale = stale.get(r.file_path, False)
+        self._enrich(results, stale)
         mode = "siblings" if include_siblings else "children"
         return SearchResult(results, mode, f"unit {unit_id}", "local", self._nav_budget(2000))
 
@@ -764,6 +883,7 @@ class Retriever:
             "lines": [unit.start_line, unit.end_line],
             "commit": commit,
             "stale": self._stale_map([path]).get(path, False),
+            "stale_basis": self._basis_for(path),
             "callees": calls,
         }
 
@@ -786,8 +906,7 @@ class Retriever:
             commit = fr["commit"]
         results = [self._retrieved(u, path, commit) for u in units]
         stale = self._stale_map([path])
-        for r in results:
-            r.stale = stale.get(path, False)
+        self._enrich(results, stale)
         return SearchResult(
             results,
             "symbols",

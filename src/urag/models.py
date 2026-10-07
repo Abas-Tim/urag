@@ -78,6 +78,7 @@ class RetrievedUnit:
     lexical_rank: int | None = None
     commit: str = ""
     stale: bool = False
+    stale_basis: str = ""
     caller_of: str = ""
     call_line: int = 0
     hop: int = 0
@@ -100,7 +101,9 @@ class RetrievedUnit:
             "lines": [u.start_line, u.end_line],
             "score": round(self.score, 4),
             "commit": self.commit,
+            "indexed_commit": self.commit,
             "stale": self.stale,
+            "stale_basis": self.stale_basis,
             "hop": self.hop,
         }
         if self.caller_of:

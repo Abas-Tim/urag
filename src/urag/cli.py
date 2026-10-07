@@ -32,7 +32,7 @@ from .config import (
 )
 from .db import Database
 from .embed import Embedder, NoopEmbedder, create_embedder, purge_model_cache
-from .indexer import Indexer
+from .indexer import Indexer, coverage_report
 from .retrieve import Retriever
 from .watcher import run_watch
 
@@ -347,6 +347,8 @@ def search(
         console.print(
             f"[dim]class={result.query_class} budget={result.budget_tokens} tok · {result.mode}[/dim]"
         )
+        if result.fallback:
+            console.print(f"[yellow]fallback: {result.fallback}[/yellow]")
         if not result.results:
             console.print("[yellow]no results[/yellow]")
             return
@@ -848,6 +850,15 @@ def status(
     cfg, db = _engine(root)
     s = db.stats()
     db.close()
+    dense_ready = s.embedded > 0 and cfg.embedding.provider != "none"
+    if dense_ready:
+        dense_note = ""
+    elif cfg.embedding.provider == "none":
+        dense_note = "lexical-only: embedding provider is 'none'"
+    else:
+        dense_note = (
+            "lexical-only: no embeddings indexed yet; run `urag index` with an embedding provider"
+        )
     if json_out:
         payload = {
             "root": str(cfg.project_root.resolve()),
@@ -860,6 +871,8 @@ def status(
                 "provider": cfg.embedding.provider,
                 "model": cfg.embedding.model,
                 "dimension": cfg.embedding.dimension,
+                "dense_ready": dense_ready,
+                "dense_note": dense_note,
             },
             "by_language": s.by_language,
         }
@@ -871,6 +884,7 @@ def status(
     t.add_row("files", str(s.files))
     t.add_row("units", str(s.units))
     t.add_row("embedded", str(s.embedded))
+    t.add_row("dense retrieval", "ready" if dense_ready else dense_note)
     t.add_row("db size", f"{s.size_bytes / 1024:.0f} KiB")
     t.add_row("last indexed", s.last_indexed)
     t.add_row("embedding provider", cfg.embedding.provider)
@@ -888,7 +902,10 @@ def doctor(
     """Check the installation and index health."""
     cfg, db = _engine(root)
     ok = True
-    db.close()
+    try:
+        coverage = coverage_report(cfg, db)
+    finally:
+        db.close()
     hints: list[str] = []
     if "xml" not in cfg.index.languages:
         xml_hits = _find_xml_family_files(cfg)
@@ -919,6 +936,7 @@ def doctor(
             "root": str(cfg.project_root.resolve()),
             "index": str(cfg.db_path),
             "embedding": embedding,
+            "coverage": coverage,
             "hints": hints,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -927,6 +945,25 @@ def doctor(
         return
     console.print(f"[bold]project:[/bold] {cfg.project_root}")
     console.print(f"[bold]index:[/bold] {cfg.db_path} [green]OK[/green]")
+    counts = coverage["counts"]
+    console.print(
+        f"[bold]coverage:[/bold] {counts['indexed']}/{coverage['total_files']} files indexed"
+    )
+    skipped = [
+        f"{name}={counts[name]}"
+        for name in (
+            "excluded",
+            "unsupported_extension",
+            "language_disabled",
+            "too_large",
+            "not_indexed",
+        )
+        if counts[name]
+    ]
+    if skipped:
+        console.print(f"  skipped: {', '.join(skipped)}")
+    for ext, count in list(coverage["unsupported_extensions"].items())[:5]:
+        console.print(f"  unsupported extension {ext!r}: {count} file(s)")
     for hint in hints:
         console.print(f"[yellow]hint: {hint}[/yellow]")
     if cfg.embedding.provider == "local":

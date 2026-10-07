@@ -34,6 +34,95 @@ def _noop(msg: str) -> None:
     pass
 
 
+def build_specs(cfg: Config) -> list[pathspec.PathSpec]:
+    specs: list[pathspec.PathSpec] = []
+    if not cfg.index.ignore_gitignore:
+        gi = cfg.project_root / ".gitignore"
+        if gi.exists():
+            specs.append(
+                pathspec.GitIgnoreSpec.from_lines(
+                    gi.read_text(encoding="utf-8", errors="replace").splitlines(),
+                )
+            )
+    excludes = list(cfg.index.exclude)
+    specs.append(pathspec.PathSpec.from_lines("gitignore", [f"{e}/" for e in excludes]))
+    return specs
+
+
+def is_excluded(cfg: Config, specs: list[pathspec.PathSpec], rel: str) -> bool:
+    if cfg.index.include:
+        import fnmatch
+
+        return not any(fnmatch.fnmatch(rel, p) for p in cfg.index.include)
+    return any(s.match_file(rel) for s in specs)
+
+
+def coverage_report(cfg: Config, db: Database) -> dict:
+    """Explain how files present on disk are treated by discovery.
+
+    Distinguishes unsupported extensions (e.g. `.ps1`, `.comp`), disabled
+    languages, exclusion rules, and size limits from files that are simply
+    not indexed yet, so coverage gaps are diagnosable instead of silent."""
+    specs = build_specs(cfg)
+    root = cfg.project_root
+    indexed = db.known_paths()
+    langs = set(cfg.index.languages)
+    counts = {
+        "indexed": 0,
+        "excluded": 0,
+        "unsupported_extension": 0,
+        "language_disabled": 0,
+        "too_large": 0,
+        "not_indexed": 0,
+    }
+    unsupported: dict[str, int] = {}
+    disabled: dict[str, int] = {}
+    examples: dict[str, list[str]] = {}
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel in indexed:
+            counts["indexed"] += 1
+            continue
+        if is_excluded(cfg, specs, rel):
+            reason = "excluded"
+        else:
+            result = language_for_path(p)
+            if result is None:
+                reason = "unsupported_extension"
+                if not p.name.startswith("."):
+                    ext = p.suffix.lower() or p.name
+                    unsupported[ext] = unsupported.get(ext, 0) + 1
+            else:
+                lang, _kind = result
+                if lang not in langs and not (lang == "tsx" and "typescript" in langs):
+                    reason = "language_disabled"
+                    disabled[lang] = disabled.get(lang, 0) + 1
+                else:
+                    try:
+                        too_large = p.stat().st_size > cfg.index.max_file_bytes
+                    except OSError:
+                        too_large = False
+                    reason = "too_large" if too_large else "not_indexed"
+        counts[reason] += 1
+        bucket = examples.setdefault(reason, [])
+        if len(bucket) < 5:
+            bucket.append(rel)
+    return {
+        "total_files": sum(counts.values()),
+        "counts": counts,
+        "unsupported_extensions": dict(
+            sorted(unsupported.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        ),
+        "disabled_languages": dict(sorted(disabled.items(), key=lambda kv: (-kv[1], kv[0]))[:10]),
+        "examples": examples,
+    }
+
+
 class Indexer:
     def __init__(self, cfg: Config, db: Database, embedder: Embedder, progress: Progress = _noop):
         self.cfg = cfg
@@ -53,25 +142,10 @@ class Indexer:
     # ---------- discovery ----------
 
     def _build_specs(self) -> list[pathspec.PathSpec]:
-        specs: list[pathspec.PathSpec] = []
-        if not self.cfg.index.ignore_gitignore:
-            gi = self._root / ".gitignore"
-            if gi.exists():
-                specs.append(
-                    pathspec.GitIgnoreSpec.from_lines(
-                        gi.read_text(encoding="utf-8", errors="replace").splitlines(),
-                    )
-                )
-        excludes = list(self.cfg.index.exclude)
-        specs.append(pathspec.PathSpec.from_lines("gitignore", [f"{e}/" for e in excludes]))
-        return specs
+        return build_specs(self.cfg)
 
     def _is_excluded(self, rel: str) -> bool:
-        if self.cfg.index.include:
-            import fnmatch
-
-            return not any(fnmatch.fnmatch(rel, p) for p in self.cfg.index.include)
-        return any(s.match_file(rel) for s in self._specs)
+        return is_excluded(self.cfg, self._specs, rel)
 
     def discover(self) -> list[Path]:
         out: list[Path] = []

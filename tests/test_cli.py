@@ -46,8 +46,6 @@ def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
     assert "loading embedding model" in captured.out
 
 
-
-
 def test_status_json_output(tmp_path):
     _empty_index(tmp_path)
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -71,6 +69,26 @@ def test_doctor_json_output(tmp_path):
     payload = json.loads(result.output)
     assert payload["ok"] is True
     assert payload["embedding"]["provider"] == "none"
+    assert "coverage" in payload
+
+
+def test_doctor_reports_coverage_by_reason(tmp_path):
+    _empty_index(tmp_path)
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "script.ps1").write_text("Write-Host 'hi'\n", encoding="utf-8")
+    cfg = load_config(tmp_path)
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    Indexer(cfg, db, NoopEmbedder()).index_all()
+    db.close()
+
+    result = CliRunner().invoke(cli.app, ["doctor", "--root", str(tmp_path), "--json"])
+
+    assert result.exit_code == 0
+    coverage = json.loads(result.output)["coverage"]
+    assert coverage["counts"]["indexed"] == 1
+    assert coverage["counts"]["unsupported_extension"] == 1
+    assert coverage["unsupported_extensions"][".ps1"] == 1
+    assert coverage["examples"]["unsupported_extension"] == ["script.ps1"]
 
 
 def test_read_json_output(tmp_path):

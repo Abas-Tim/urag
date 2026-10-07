@@ -102,16 +102,23 @@ _CONCEPT_WORDS = (
 )
 
 
+def _is_symbol_token(token: str) -> bool:
+    return bool(
+        _DOTTED.match(token) or _SNAKE.match(token) or _CAMEL.match(token) or _UPPER.match(token)
+    )
+
+
 def classify(query: str) -> str:
     q = query.strip()
     lowered = q.lower()
     if len(q) < 2:
         return "local"
+    words = q.split()
     if (
         _DOTTED.match(q)
         or _SNAKE.match(q)
         or _CAMEL.match(q)
-        or _UPPER.match(q.split()[0] if q.split() else q)
+        or (len(words) == 1 and _UPPER.match(words[0]))
     ):
         return "symbol"
     if _FILEPATH.search(q):
@@ -122,13 +129,10 @@ def classify(query: str) -> str:
         return "debugging"
     if any(w in lowered for w in _CONCEPT_WORDS):
         return "local"
-    if len(q.split()) <= 3:
+    if len(words) <= 3:
         toks = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", q)
-        non_plain = any(
-            _DOTTED.match(t) or _SNAKE.match(t) or _CAMEL.match(t) or _UPPER.match(t)
-            for t in toks
-        )
-        return "symbol" if non_plain else "local"
+        if toks and all(_is_symbol_token(t) for t in toks):
+            return "symbol"
     return "local"
 
 

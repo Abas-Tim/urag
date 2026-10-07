@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-06
 
 - Retrieval transparency: search responses now report `mode_requested`
   (what the caller asked for), the effective `mode`, `dense_ready`, and a

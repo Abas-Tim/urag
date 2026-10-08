@@ -67,7 +67,7 @@ def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
 
     assert "embedding unavailable" in captured.err
-    assert "loading embedding model" in captured.out
+    assert "loading embedding model" in captured.err
 
 
 def test_status_json_output(tmp_path):

@@ -1,10 +1,12 @@
+import json
 import re
+from contextlib import closing
 
 import pytest
 from typer.testing import CliRunner
 
 import urag.cli as cli
-from urag.config import load_config
+from urag.config import EmbeddingConfig, load_config
 from urag.db import Database
 from urag.embed import LocalEmbedder, model_cache_subdir, purge_model_cache
 
@@ -153,6 +155,61 @@ def test_local_embedder_rejects_dimension_mismatch(tmp_path):
     cfg.embedding.dimension = 384
     with pytest.raises(RuntimeError, match="768"):
         LocalEmbedder(cfg.embedding)
+
+
+def test_local_passage_batches_restore_input_order(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeModel:
+        @staticmethod
+        def get_embedding_size(model):
+            return 2
+
+        def __init__(self, **kwargs):
+            assert kwargs["threads"] == 3
+
+        def embed(self, texts, *, batch_size):
+            calls.append((texts, batch_size))
+            return [[float(len(text)), float(ord(text[0]))] for text in texts]
+
+    monkeypatch.setattr("fastembed.TextEmbedding", FakeModel)
+    cfg = EmbeddingConfig(dimension=2, threads=3, batch_size=2)
+    emb = LocalEmbedder(cfg, cache_dir=tmp_path)
+    assert emb.embed_passages(["longest", "a", "medium"]) == [
+        [7.0, 108.0],
+        [1.0, 97.0],
+        [6.0, 109.0],
+    ]
+    assert calls == [(["a", "medium", "longest"], 2)]
+    assert emb.embed_passages([]) == []
+    assert len(calls) == 1
+
+
+def test_execution_settings_persist_without_invalidating_vectors(tmp_path):
+    cfg = _init(tmp_path)
+    fingerprint = cfg.embedding.fingerprint()
+    with closing(Database(cfg.db_path, cfg.embedding.dimension)) as db:
+        db.store_embeddings([(1, "python", "symbol", [0.0] * cfg.embedding.dimension)])
+    result = CliRunner().invoke(
+        cli.app, ["embed", "--root", str(tmp_path), "--threads", "4", "--batch-size", "16"]
+    )
+    assert result.exit_code == 0, result.output
+    loaded = load_config(tmp_path)
+    assert loaded.embedding.threads == 4
+    assert loaded.embedding.batch_size == 16
+    assert loaded.embedding.fingerprint() == fingerprint
+    with closing(Database(cfg.db_path, cfg.embedding.dimension)) as db:
+        assert db.stats().embedded == 1
+
+
+@pytest.mark.parametrize("name", ["batch_size", "threads"])
+@pytest.mark.parametrize("value", [-1, True, 1.5, "auto"])
+def test_rejects_invalid_execution_settings(tmp_path, name, value):
+    cfg = load_config(tmp_path)
+    cfg.urag_dir.mkdir(parents=True)
+    cfg.config_path.write_text(f"[embedding]\n{name} = {json.dumps(value)}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=f"embedding.{name}"):
+        load_config(tmp_path)
 
 
 def test_purge_model_cache_removes_model_dir(tmp_path):

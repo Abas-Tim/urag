@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shutil
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import httpx
@@ -23,6 +23,14 @@ class Embedder(ABC):
     @abstractmethod
     def dimension(self) -> int: ...
 
+    @property
+    def batch_size(self) -> int:
+        return 64
+
+    @property
+    def group_by_length(self) -> bool:
+        return False
+
     @abstractmethod
     def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed documents/summaries for indexing."""
@@ -30,6 +38,30 @@ class Embedder(ABC):
     @abstractmethod
     def embed_query(self, text: str) -> list[float]:
         """Embed a single search query."""
+
+
+class LazyEmbedder(Embedder):
+    """Load a provider only when retrieval actually needs a dense vector."""
+
+    def __init__(self, dimension: int, factory: Callable[[], Embedder]):
+        self._dimension = dimension
+        self._factory = factory
+        self._loaded: Embedder | None = None
+
+    @property
+    def dimension(self) -> int:
+        return self._loaded.dimension if self._loaded is not None else self._dimension
+
+    def _get(self) -> Embedder:
+        if self._loaded is None:
+            self._loaded = self._factory()
+        return self._loaded
+
+    def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
+        return self._get().embed_passages(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._get().embed_query(text)
 
 
 class LocalEmbedder(Embedder):
@@ -54,14 +86,30 @@ class LocalEmbedder(Embedder):
         self.model = TextEmbedding(
             model_name=cfg.model,
             cache_dir=str(self.cache_dir),
+            threads=cfg.threads or None,
         )
 
     @property
     def dimension(self) -> int:
         return self._dim
 
+    @property
+    def batch_size(self) -> int:
+        return self.cfg.passage_batch_size
+
+    @property
+    def group_by_length(self) -> bool:
+        return True
+
     def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
-        return [[float(x) for x in v] for v in self.model.embed(list(texts))]
+        if not texts:
+            return []
+        order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+        vectors = list(self.model.embed([texts[i] for i in order], batch_size=self.batch_size))
+        restored: list[list[float]] = [[] for _ in texts]
+        for index, vector in zip(order, vectors, strict=True):
+            restored[index] = [float(x) for x in vector]
+        return restored
 
     def embed_query(self, text: str) -> list[float]:
         return [float(x) for x in next(self.model.query_embed(text))]
@@ -76,6 +124,10 @@ class HttpEmbedder(Embedder):
     @property
     def dimension(self) -> int:
         return self.cfg.dimension
+
+    @property
+    def batch_size(self) -> int:
+        return self.cfg.passage_batch_size
 
     def _call(self, texts: Sequence[str]) -> list[list[float]]:
         if not self.cfg.http_url:

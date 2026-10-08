@@ -18,7 +18,7 @@ from mcp.server.mcpserver import MCPServer
 from . import __version__
 from .config import Config, discover_project_root, ensure_gitignore, load_config
 from .db import Database
-from .embed import Embedder, NoopEmbedder, create_embedder
+from .embed import Embedder, LazyEmbedder, NoopEmbedder, create_embedder
 from .git_aware import Git
 from .indexer import Indexer
 from .retrieve import Retriever, fit_evidence
@@ -64,7 +64,7 @@ Filter by `language` when you know the stack (python, typescript, javascript).
 
 
 def _embedder(cfg: Config) -> Embedder:
-    key = f"{cfg.embedding.provider}:{cfg.embedding.model}:{cfg.embedding.dimension}"
+    key = f"{cfg.embedding.fingerprint()}:{cfg.embedding.batch_size}:{cfg.embedding.threads}"
     with _embedder_lock:
         if key not in _embedder_cache:
             try:
@@ -77,6 +77,11 @@ def _embedder(cfg: Config) -> Embedder:
                 )
                 _embedder_cache[key] = NoopEmbedder()
         return _embedder_cache[key]
+
+
+def _retrieval_embedder(cfg: Config) -> Embedder:
+    dimension = cfg.embedding.dimension if cfg.embedding.provider != "none" else 0
+    return LazyEmbedder(dimension, lambda: _embedder(cfg))
 
 
 class IndexUnavailableError(RuntimeError):
@@ -205,7 +210,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     ) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).search(
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).search(
                     query,
                     top_k=top_k,
                     mode=mode or "hybrid",
@@ -244,7 +249,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def fetch_unit(unit_id: int) -> str:
         try:
             with _database(cfg) as db:
-                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                retriever = Retriever(cfg, db, _retrieval_embedder(cfg), git)
                 ev = retriever.get(unit_id)
                 if not ev:
                     return json.dumps({"error": "unit not found"})
@@ -267,7 +272,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def fetch_units(unit_ids: list[int], max_tokens: int | None = None) -> str:
         try:
             with _database(cfg) as db:
-                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                retriever = Retriever(cfg, db, _retrieval_embedder(cfg), git)
                 evs = retriever.get_many(unit_ids, max_tokens=max_tokens)
                 enriched = []
                 for ev in evs:
@@ -295,7 +300,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def callers(name: str, limit: int = 20, depth: int = 1) -> str:
         try:
             with _database(cfg) as db:
-                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                retriever = Retriever(cfg, db, _retrieval_embedder(cfg), git)
                 if depth > 1:
                     result = retriever.search_transitive(name, depth=depth, limit=limit)
                 else:
@@ -330,7 +335,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def references(name: str, limit: int = 30, depth: int = 1) -> str:
         try:
             with _database(cfg) as db:
-                retriever = Retriever(cfg, db, _embedder(cfg), git)
+                retriever = Retriever(cfg, db, _retrieval_embedder(cfg), git)
                 if depth > 1:
                     result = retriever.search_transitive_references(name, depth=depth, limit=limit)
                 else:
@@ -365,7 +370,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def dead_symbols(limit: int = 50, language: str | None = None) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).unreferenced(
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).unreferenced(
                     limit=limit, language=language
                 )
                 packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
@@ -394,7 +399,9 @@ def create_server(root: Path | None = None) -> MCPServer:
     def resolve(name: str, limit: int = 10) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).resolve(name, limit=limit)
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).resolve(
+                    name, limit=limit
+                )
                 packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
                 return json.dumps(
                     {
@@ -420,7 +427,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def callees(unit_id: int) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).callees(unit_id)
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).callees(unit_id)
                 return (
                     json.dumps(result, ensure_ascii=False)
                     if result
@@ -442,7 +449,9 @@ def create_server(root: Path | None = None) -> MCPServer:
     def dependents(target: str, limit: int = 50) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).dependents(target, limit=limit)
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).dependents(
+                    target, limit=limit
+                )
                 result["count"] = len(result["results"])
                 return json.dumps(result, ensure_ascii=False)
         except IndexUnavailableError as exc:
@@ -460,7 +469,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def children(unit_id: int, include_siblings: bool = False) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).children(
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).children(
                     unit_id, include_siblings=include_siblings
                 )
                 packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
@@ -487,7 +496,9 @@ def create_server(root: Path | None = None) -> MCPServer:
     def list_files(language: str | None = None) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).list_files(language=language)
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).list_files(
+                    language=language
+                )
                 return json.dumps(result, ensure_ascii=False)
         except IndexUnavailableError as exc:
             return _error_response(exc)
@@ -504,7 +515,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def list_symbols(file: str) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).list_symbols(file)
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).list_symbols(file)
                 packets = [_packet(r, False, db, result.budget_tokens) for r in result.results]
                 return json.dumps(
                     {"file": file, "count": len(packets), "results": packets},
@@ -526,7 +537,7 @@ def create_server(root: Path | None = None) -> MCPServer:
     def read_file(path: str, start: int | None = None, end: int | None = None) -> str:
         try:
             with _database(cfg) as db:
-                result = Retriever(cfg, db, _embedder(cfg), git).read_file(
+                result = Retriever(cfg, db, _retrieval_embedder(cfg), git).read_file(
                     path, start=start, end=end
                 )
                 return json.dumps(result, ensure_ascii=False)

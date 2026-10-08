@@ -44,3 +44,20 @@ def test_mcp_init_project_adds_gitignore_entry(tmp_path):
 
     assert result["initialized"] is True
     assert ".urag/" in (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_mcp_deferred_index_can_be_queried_without_loading_model(tmp_path, monkeypatch):
+    (tmp_path / "m.py").write_text("def alpha(): return 1\n", encoding="utf-8")
+
+    def unexpected_load(_cfg):
+        raise AssertionError("lexical and graph queries must not load the embedding model")
+
+    monkeypatch.setattr("urag.mcp_server._embedder", unexpected_load)
+    server = create_server(tmp_path)
+    initialized = _call(server, "urag_init_project", {"embed": False})
+    assert initialized["initialized"] is True
+    for mode in ("lexical", "hybrid"):
+        search = _call(server, "urag_search", {"query": "alpha", "mode": mode})
+        assert search["results"][0]["name"] == "alpha"
+    resolved = _call(server, "urag_resolve", {"name": "alpha"})
+    assert resolved["results"][0]["name"] == "alpha"

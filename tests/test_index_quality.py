@@ -3,9 +3,11 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from urag.config import load_config
 from urag.db import Database
-from urag.embed import NoopEmbedder
+from urag.embed import Embedder, NoopEmbedder
 from urag.indexer import Indexer
 
 
@@ -40,6 +42,61 @@ def test_deleted_files_remove_vectors(tmp_path: Path):
         db.delete_files(["auth.py"])
         assert db.stats().embedded == 0
         assert db.counts() == (0, 0)
+    finally:
+        db.close()
+
+
+def test_length_grouped_embedding_phase_resumes_committed_batches(tmp_path):
+    (tmp_path / "m.py").write_text(
+        'def longest_name(value):\n    """A longer descriptive summary for this unit."""\n'
+        "    return value\n\ndef tiny():\n    return 1\n\ndef middle(value):\n    return value\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    cfg.embedding.dimension = 2
+    db = Database(cfg.db_path, 2)
+
+    class FakeEmbedder(Embedder):
+        def __init__(self, interrupt=False):
+            self.interrupt = interrupt
+            self.completed = []
+
+        @property
+        def dimension(self):
+            return 2
+
+        @property
+        def batch_size(self):
+            return 2
+
+        @property
+        def group_by_length(self):
+            return True
+
+        def embed_passages(self, texts):
+            if self.interrupt and self.completed:
+                raise RuntimeError("interrupted")
+            self.completed.extend(texts)
+            return [[float(len(text)), 1.0] for text in texts]
+
+        def embed_query(self, text):
+            return [1.0, 0.0]
+
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        interrupted = FakeEmbedder(interrupt=True)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            Indexer(cfg, db, interrupted).embed_pending()
+        assert db.stats().embedded == 2
+        before = dict(db.conn.execute("SELECT unit_id, embedding FROM vec_units"))
+        resumed = FakeEmbedder()
+        assert Indexer(cfg, db, resumed).embed_pending() == 1
+        assert db.stats().embedded == 3
+        assert not set(interrupted.completed) & set(resumed.completed)
+        after = dict(db.conn.execute("SELECT unit_id, embedding FROM vec_units"))
+        assert all(after[uid] == vector for uid, vector in before.items())
+        lengths = list(map(len, interrupted.completed + resumed.completed))
+        assert lengths == sorted(lengths)
     finally:
         db.close()
 

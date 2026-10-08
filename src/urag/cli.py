@@ -31,7 +31,7 @@ from .config import (
     load_config,
 )
 from .db import Database
-from .embed import Embedder, NoopEmbedder, create_embedder, purge_model_cache
+from .embed import Embedder, LazyEmbedder, NoopEmbedder, create_embedder, purge_model_cache
 from .indexer import Indexer, coverage_report
 from .retrieve import Retriever
 from .watcher import run_watch
@@ -133,7 +133,7 @@ def _find_xml_family_files(cfg: Config, cap: int = 1000) -> int:
 
 
 def _embedder(cfg: Config) -> Embedder:
-    key = f"{cfg.embedding.provider}:{cfg.embedding.model}:{cfg.embedding.dimension}"
+    key = f"{cfg.embedding.fingerprint()}:{cfg.embedding.batch_size}:{cfg.embedding.threads}"
     if key in _embedder_cache:
         return _embedder_cache[key]
     if cfg.embedding.provider == "local":
@@ -163,11 +163,21 @@ def _engine(root: Path | None = None, migrate: bool = False) -> tuple[Config, Da
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _retrieval_embedder(cfg: Config) -> Embedder:
+    dimension = cfg.embedding.dimension if cfg.embedding.provider != "none" else 0
+    return LazyEmbedder(dimension, lambda: _embedder(cfg))
+
+
 @app.command()
 def init(
     root: Path = typer.Option(".", help="project root to index"),
     full: bool = typer.Option(False, "--full", help="also run a full index"),
-    no_embed: bool = typer.Option(False, "--no-embed", help="skip model download / embedding"),
+    no_embed: bool = typer.Option(
+        False,
+        "--no-embed",
+        "--defer-embeddings",
+        help="build lexical/graph index; defer dense vectors",
+    ),
 ):
     """Set up .urag/ config and initial index for a project."""
     root = root.resolve()
@@ -184,17 +194,37 @@ def init(
     db = Database(cfg.db_path, cfg.embedding.dimension, migrate=True)
     console.print(f"[green]initialized {cfg.urag_dir}[/green]")
     console.print(f"config: {cfg.config_path}")
-    if full:
-        embedder = NoopEmbedder() if no_embed else _embedder(cfg)
-        indexer = Indexer(cfg, db, embedder, progress=_flush_progress)
-        _flush_progress(f"[dim]indexing {root}...[/dim]")
+    try:
+        if full:
+            _run_index_phases(cfg, db, defer_embeddings=no_embed)
+    finally:
+        db.close()
+
+
+def _run_index_phases(
+    cfg: Config, db: Database, *, defer_embeddings: bool = False, embeddings_only: bool = False
+) -> None:
+    indexer = Indexer(cfg, db, NoopEmbedder(), progress=_flush_progress)
+    if not embeddings_only:
+        _flush_progress(f"[dim]indexing {cfg.project_root}...[/dim]")
         indexer.index_all()
-        console.print(
-            "[dim]a first full index can take minutes (local CPU embeddings). "
-            "Interrupted? Just run `urag index` again — it resumes where it "
-            "stopped.[/dim]"
+        _flush_progress("[green]lexical and graph index ready[/green]")
+    if cfg.embedding.provider == "none":
+        return
+    if indexer.pending_embedding_count() == 0:
+        _flush_progress("[dim]embedded 0 pending units; dense embeddings up to date[/dim]")
+        return
+    if defer_embeddings:
+        _flush_progress(
+            "[dim]dense embeddings deferred; run `urag index --embeddings-only` when ready[/dim]"
         )
-    db.close()
+        return
+    _flush_progress(
+        "[dim]starting dense embedding phase (local CPU embeddings can take minutes). "
+        "Interrupted? Run `urag index --embeddings-only` to resume.[/dim]"
+    )
+    indexer.embedder = _embedder(cfg)
+    indexer.embed_pending()
 
 
 def _detect_local_dimension(model: str) -> int | None:
@@ -218,17 +248,25 @@ def embed(
     keep_cache: bool = typer.Option(
         False, "--keep-cache", help="keep the old model's files in the local cache"
     ),
+    batch_size: Optional[int] = typer.Option(
+        None, "--batch-size", min=0, help="passages per batch (0: local 8, HTTP 64)"
+    ),
+    threads: Optional[int] = typer.Option(
+        None, "--threads", min=0, help="local ONNX threads (0: automatic)"
+    ),
 ):
     """Show or change the embedding model. Switching clears old embeddings."""
     root = root.resolve()
     cfg = load_config(root)
     emb = cfg.embedding
 
-    if model is None and provider is None and dimension is None:
+    if all(value is None for value in (model, provider, dimension, batch_size, threads)):
         console.print(f"[bold]embedding config[/bold] ({cfg.config_path})")
         console.print(f"  provider:  {emb.provider}")
         console.print(f"  model:     {emb.model}")
         console.print(f"  dimension: {emb.dimension}")
+        console.print(f"  batch:     {emb.passage_batch_size} (configured: {emb.batch_size})")
+        console.print(f"  threads:   {emb.threads or 'automatic'}")
         if emb.provider == "local":
             console.print(f"  cache:     {default_model_cache_dir()}")
         if cfg.db_path.exists():
@@ -301,10 +339,14 @@ def embed(
     emb.provider = new_provider
     emb.model = new_model
     emb.dimension = new_dim
+    if batch_size is not None:
+        emb.batch_size = batch_size
+    if threads is not None:
+        emb.threads = threads
     cfg.save()
 
     if not changed:
-        console.print("[green]embedding config unchanged[/green]")
+        console.print("[green]embedding config saved[/green]")
     else:
         console.print(f"[green]switched to {new_provider}:{new_model} ({new_dim}d)[/green]")
         if not reindex and new_provider != "none" and cfg.db_path.exists():
@@ -320,15 +362,26 @@ def embed(
 @app.command()
 def index(
     root: Path = typer.Option(".", help="project root"),
-    no_embed: bool = typer.Option(False, "--no-embed", help="skip embedding new units"),
+    no_embed: bool = typer.Option(
+        False,
+        "--no-embed",
+        "--defer-embeddings",
+        help="build lexical/graph index; defer dense vectors",
+    ),
+    embeddings_only: bool = typer.Option(
+        False, "--embeddings-only", help="fill missing dense vectors without scanning source files"
+    ),
 ):
     """Incrementally index changed files (full pass on first run)."""
+    if no_embed and embeddings_only:
+        raise typer.BadParameter("--embeddings-only cannot be combined with --defer-embeddings")
     cfg, db = _engine(root, migrate=True)
-    embedder = NoopEmbedder() if no_embed else _embedder(cfg)
-    indexer = Indexer(cfg, db, embedder, progress=_flush_progress)
-    _flush_progress(f"[dim]indexing {cfg.project_root}...[/dim]")
-    indexer.index_all()
-    db.close()
+    try:
+        if embeddings_only and cfg.embedding.provider == "none":
+            raise typer.BadParameter("configure an embedding provider before filling dense vectors")
+        _run_index_phases(cfg, db, defer_embeddings=no_embed, embeddings_only=embeddings_only)
+    finally:
+        db.close()
 
 
 @app.command()
@@ -360,7 +413,7 @@ def search(
     try:
         from .git_aware import Git
 
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).search(
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).search(
             query, top_k=top_k, mode=mode, language=language
         )
         if json_out:
@@ -519,7 +572,7 @@ def callers(
 
     cfg, db = _engine(root)
     try:
-        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        retriever = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root))
         if depth > 1:
             result = retriever.search_transitive(name, depth=depth, limit=top_k or 20)
         else:
@@ -562,7 +615,7 @@ def references(
 
     cfg, db = _engine(root)
     try:
-        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        retriever = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root))
         if depth > 1:
             result = retriever.search_transitive_references(name, depth=depth, limit=top_k or 30)
         else:
@@ -601,7 +654,7 @@ def deadcode(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).unreferenced(
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).unreferenced(
             limit=top_k or 50, language=language
         )
         if json_out:
@@ -648,7 +701,7 @@ def get(
     cfg, db = _engine(root)
     from .git_aware import Git
 
-    ev = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).get(unit_id)
+    ev = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).get(unit_id)
     db.close()
     if ev is None:
         error_console.print("[yellow]unit not found[/yellow]")
@@ -689,7 +742,7 @@ def resolve(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).resolve(
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).resolve(
             name, limit=top_k or 10
         )
         if json_out:
@@ -723,7 +776,7 @@ def callees(
 
     cfg, db = _engine(root)
     try:
-        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        retriever = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root))
         if target.strip().isdigit():
             result = retriever.callees(int(target))
             if result is None:
@@ -772,7 +825,7 @@ def dependents(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).dependents(
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).dependents(
             target, limit=top_k or 50
         )
         result["count"] = len(result["results"])
@@ -800,7 +853,9 @@ def symbols_cmd(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).list_symbols(file)
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).list_symbols(
+            file
+        )
         if json_out:
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return
@@ -837,7 +892,7 @@ def read_cmd(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).read_file(
+        result = Retriever(cfg, db, _retrieval_embedder(cfg), Git(cfg.project_root)).read_file(
             path,
             start=start_opt if start_opt is not None else start,
             end=end_opt if end_opt is not None else end,

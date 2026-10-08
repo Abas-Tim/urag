@@ -1,13 +1,18 @@
 """Tests for the eval harness (autogen, gold resolution, metrics, chunk mapping)."""
 
+import json
+import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from urag.config import load_config
 from urag.db import Database
-from urag.embed import NoopEmbedder
+from urag.embed import Embedder, NoopEmbedder
 from urag.eval import (
+    ChunkBaseline,
     Hit,
     OracleBaseline,
     Question,
@@ -157,6 +162,117 @@ def test_aggregate():
 
 def test_rg_path_normalization():
     assert RgBaseline._normalize_path(r".\src\auth.py") == "src/auth.py"
+
+
+def test_rg_decodes_utf8_and_replaces_invalid_bytes(db, tmp_path, monkeypatch):
+    run = subprocess.run
+
+    def fake_rg(_args, **kwargs):
+        return run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'./m.py:3:alpha \\xe2\\x80\\x94 \\x81\\n')",
+            ],
+            **kwargs,
+        )
+
+    monkeypatch.setattr("urag.eval.subprocess.run", fake_rg)
+    result = RgBaseline(tmp_path).search("alpha", 5, db)
+
+    assert result.hits
+    assert result.hits[0].file == "m.py"
+    assert result.hits[0].detail == "3: alpha — �"
+
+
+class CountingEmbedder(Embedder):
+    @property
+    def dimension(self):
+        return 2
+
+    def __init__(self):
+        self.texts = []
+        self.fail_after: int | None = None
+
+    def embed_passages(self, texts):
+        if self.fail_after is not None and len(self.texts) >= self.fail_after:
+            raise RuntimeError("interrupted")
+        self.texts.extend(texts)
+        return [[float(len(text)), 1.0] for text in texts]
+
+    def embed_query(self, text):
+        return [1.0, 0.0]
+
+
+def test_chunk_cache_reuses_vectors_and_invalidates_changed_inputs(db, tmp_path):
+    cfg = load_config(tmp_path)
+    embedder = CountingEmbedder()
+    first = ChunkBaseline(cfg, db, embedder)
+    assert len(embedder.texts) == len(first.chunks)
+    embedder.texts.clear()
+
+    cached = ChunkBaseline(cfg, db, embedder)
+    assert embedder.texts == []
+    assert cached.vectors == first.vectors
+    assert cached.cached_chunks == len(first.chunks)
+    assert cached.search("alpha", 1, db).hits == first.search("alpha", 1, db).hits
+
+    (tmp_path / "extra.py").write_bytes(b"def extra(): return 2\n")
+    ChunkBaseline(cfg, db, embedder)
+    assert embedder.texts == ["def extra(): return 2\n"]
+    embedder.texts.clear()
+
+    (tmp_path / "extra.py").write_bytes(b"def extra(): return 3\n")
+    ChunkBaseline(cfg, db, embedder)
+    assert embedder.texts == ["def extra(): return 3\n"]
+    embedder.texts.clear()
+
+    cfg.embedding.http_model = "different-model"
+    changed_model = ChunkBaseline(cfg, db, embedder)
+    assert changed_model.cached_chunks == 0
+    assert len(embedder.texts) == len(changed_model.chunks)
+
+
+def test_chunk_cache_repairs_invalid_vectors(db, tmp_path):
+    cfg = load_config(tmp_path)
+    embedder = CountingEmbedder()
+    first = ChunkBaseline(cfg, db, embedder)
+    with sqlite3.connect(cfg.urag_dir / "eval-chunks.sqlite3") as cache:
+        cache.execute("UPDATE embeddings SET vector = ?", ('["invalid"]',))
+    embedder.texts.clear()
+
+    repaired = ChunkBaseline(cfg, db, embedder)
+    assert repaired.cached_chunks == 0
+    assert repaired.vectors == first.vectors
+    assert embedder.texts
+
+
+def test_eval_chunk_progress_keeps_json_stdout_clean(db, tmp_path, capsys):
+    cfg = load_config(tmp_path)
+    run_eval(cfg, db, CountingEmbedder(), systems="chunk", autogen=1, json_out=True)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["chunk_cached_chunks"] == 0
+    assert "chunk baseline:" in captured.err
+
+
+def test_chunk_cache_resumes_completed_batches(db, tmp_path, monkeypatch):
+    cfg = load_config(tmp_path)
+    (tmp_path / "extra.py").write_text("def extra(): return 2\n", encoding="utf-8")
+    monkeypatch.setattr(ChunkBaseline, "BATCH_SIZE", 1)
+    embedder = CountingEmbedder()
+    embedder.fail_after = 1
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        ChunkBaseline(cfg, db, embedder)
+
+    completed = list(embedder.texts)
+    embedder.texts.clear()
+    embedder.fail_after = None
+    resumed = ChunkBaseline(cfg, db, embedder)
+    assert resumed.cached_chunks == 1
+    assert len(embedder.texts) == 1
+    assert completed[0] not in embedder.texts
 
 
 def test_eval_alias_scan_uses_imported_symbol():

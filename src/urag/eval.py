@@ -15,14 +15,18 @@ index via --autogen, so you can evaluate without hand labeling. A judge tier
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 import random
 import re
 import shutil
+import sqlite3
 import subprocess
 import time
+from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
@@ -187,6 +191,8 @@ class RgBaseline:
                     cwd=str(self.root),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=20,
                     check=False,
                 )
@@ -275,8 +281,16 @@ class ChunkBaseline:
     """Naive structure-free RAG: fixed-size chunks of every file, embedded."""
 
     CHUNK_CHARS = 600
+    BATCH_SIZE = 64
+    CACHE_VERSION = 1
 
-    def __init__(self, cfg: Config, db: Database, embedder: Embedder):
+    def __init__(
+        self,
+        cfg: Config,
+        db: Database,
+        embedder: Embedder,
+        progress: Callable[[str], None] | None = None,
+    ):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
@@ -293,8 +307,71 @@ class ChunkBaseline:
                 chunks.append((rel, seg, start, start + len(seg_bytes)))
         self.chunks = chunks
         t0 = time.perf_counter()
-        self.vectors = embedder.embed_passages([c[1] for c in chunks])
+        self.vectors = self._load_vectors(progress or (lambda _msg: None))
         self.load_seconds = time.perf_counter() - t0
+
+    def _load_vectors(self, progress: Callable[[str], None]) -> list[list[float]]:
+        namespace = hashlib.sha256(
+            f"{self.CACHE_VERSION}|{self.CHUNK_CHARS}|{self.cfg.embedding.fingerprint()}|"
+            f"{self.embedder.dimension}".encode()
+        ).hexdigest()
+        texts = {hashlib.sha256(c[1].encode("utf-8")).hexdigest(): c[1] for c in self.chunks}
+        vectors: dict[str, list[float]] = {}
+        self.cfg.urag_dir.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.cfg.urag_dir / "eval-chunks.sqlite3")) as cache:
+            cache.execute(
+                "CREATE TABLE IF NOT EXISTS embeddings ("
+                "namespace TEXT, content_hash TEXT, vector TEXT NOT NULL, "
+                "PRIMARY KEY (namespace, content_hash))"
+            )
+            for key, raw in cache.execute(
+                "SELECT content_hash, vector FROM embeddings WHERE namespace = ?", (namespace,)
+            ):
+                if key not in texts:
+                    continue
+                vector = []
+                try:
+                    vector = json.loads(raw)
+                    valid = (
+                        isinstance(vector, list)
+                        and len(vector) == self.embedder.dimension
+                        and all(isinstance(x, (int, float)) and math.isfinite(x) for x in vector)
+                    )
+                except (ValueError, TypeError, OverflowError):
+                    valid = False
+                if valid:
+                    vectors[key] = vector
+            self.cached_chunks = sum(
+                hashlib.sha256(c[1].encode("utf-8")).hexdigest() in vectors for c in self.chunks
+            )
+            missing = [key for key in texts if key not in vectors]
+            progress(
+                f"chunk baseline: {self.cached_chunks}/{len(self.chunks)} chunks cached, "
+                f"embedding {len(missing)} unique chunks"
+            )
+            for start in range(0, len(missing), self.BATCH_SIZE):
+                keys = missing[start : start + self.BATCH_SIZE]
+                batch = self.embedder.embed_passages([texts[key] for key in keys])
+                if len(batch) != len(keys):
+                    raise RuntimeError(
+                        f"embedding provider returned {len(batch)} vectors for {len(keys)} chunks"
+                    )
+                for vector in batch:
+                    if len(vector) != self.embedder.dimension or not all(
+                        math.isfinite(x) for x in vector
+                    ):
+                        raise RuntimeError("invalid embedding for evaluation chunk")
+                with cache:
+                    cache.executemany(
+                        "INSERT OR REPLACE INTO embeddings VALUES (?, ?, ?)",
+                        [
+                            (namespace, key, json.dumps(v))
+                            for key, v in zip(keys, batch, strict=True)
+                        ],
+                    )
+                vectors.update(zip(keys, batch, strict=True))
+                progress(f"  embedded chunks {start + len(keys)}/{len(missing)}")
+        return [vectors[hashlib.sha256(c[1].encode("utf-8")).hexdigest()] for c in self.chunks]
 
     def search(self, query: str, top_k: int, db: Database) -> SystemRun:
         t0 = time.perf_counter()
@@ -922,7 +999,7 @@ def run_eval(
     from .git_aware import Git
     from .retrieve import Retriever
 
-    console = console or Console()
+    console = Console(stderr=True) if json_out else (console or Console())
 
     if questions:
         qs = load_questions(questions)
@@ -954,7 +1031,7 @@ def run_eval(
     retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
     rg = RgBaseline(cfg.project_root)
     read = ReadBaseline(cfg.project_root) if "read" in chosen else None
-    chunk = ChunkBaseline(cfg, db, embedder) if "chunk" in chosen else None
+    chunk = ChunkBaseline(cfg, db, embedder, progress=console.print) if "chunk" in chosen else None
     oracle = OracleBaseline(cfg.project_root)
 
     if any(name in chosen for name in ("urag-auto", "urag-hybrid", "urag-lexical")):
@@ -1083,6 +1160,7 @@ def run_eval(
         }
         if chunk is not None:
             payload["chunk_load_seconds"] = chunk.load_seconds
+            payload["chunk_cached_chunks"] = chunk.cached_chunks
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         if json_out:
             print(text)

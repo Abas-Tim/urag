@@ -57,7 +57,10 @@ urag index --root <root>
 the initial full index unless `--full` is supplied. `urag watch --root <root>`
 keeps an existing index updated through debounced filesystem events. A first
 full index can take minutes (local CPU embeddings). If it is interrupted, just
-run `urag index` again — it resumes where it stopped.
+run `urag index` again — it resumes where it stopped. For a faster first usable
+index, use `urag init --full --defer-embeddings`; lexical and graph queries work
+without loading the model. Later, `urag index --embeddings-only` fills missing
+vectors without scanning source files. If files changed, use normal `urag index`.
 
 Use `--json` for machine-readable output from `urag_search`, `urag_callers`,
 `urag_references`, `read`, `urag_status`, and `doctor`. Use `search --evidence` for

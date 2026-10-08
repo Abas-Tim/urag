@@ -1,11 +1,12 @@
 import json
+from contextlib import closing
 
 from typer.testing import CliRunner
 
 import urag.cli as cli
 from urag.config import load_config
 from urag.db import Database
-from urag.embed import NoopEmbedder
+from urag.embed import Embedder, NoopEmbedder
 from urag.indexer import Indexer
 
 
@@ -68,6 +69,96 @@ def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
 
     assert "embedding unavailable" in captured.err
     assert "loading embedding model" in captured.err
+
+
+def test_init_reports_progress_before_model_loading_and_embedding(tmp_path, monkeypatch, capsys):
+    (tmp_path / "m.py").write_text("def alpha(): return 1\n", encoding="utf-8")
+    cfg = load_config(tmp_path)
+
+    class FakeEmbedder(Embedder):
+        @property
+        def dimension(self):
+            return cfg.embedding.dimension
+
+        def embed_passages(self, texts):
+            assert "embedding " in capsys.readouterr().out
+            return [[0.0] * self.dimension for _ in texts]
+
+        def embed_query(self, text):
+            return [0.0] * self.dimension
+
+    def load(_cfg):
+        output = capsys.readouterr().out
+        assert "indexing " in output
+        assert "lexical and graph index ready" in output
+        assert "local CPU embeddings" in output
+        return FakeEmbedder()
+
+    monkeypatch.setattr(cli, "_embedder", load)
+    cli.init(root=tmp_path, full=True, no_embed=False)
+    assert "embedded " in capsys.readouterr().out
+
+
+def test_deferred_init_then_embedding_only_does_not_scan(tmp_path, monkeypatch):
+    (tmp_path / "m.py").write_text("def alpha(): return 1\n", encoding="utf-8")
+
+    def unexpected_load(_cfg):
+        raise AssertionError("deferred init must not load a model")
+
+    monkeypatch.setattr(cli, "_embedder", unexpected_load)
+    result = CliRunner().invoke(
+        cli.app, ["init", "--full", "--defer-embeddings", "--root", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "lexical and graph index ready" in result.output
+    assert "dense embeddings deferred" in result.output
+    for mode in ("lexical", "hybrid"):
+        result = CliRunner().invoke(
+            cli.app, ["search", "alpha", "--mode", mode, "--json", "--root", str(tmp_path)]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["results"][0]["name"] == "alpha"
+    result = CliRunner().invoke(cli.app, ["resolve", "alpha", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    cfg = load_config(tmp_path)
+    with closing(Database(cfg.db_path, cfg.embedding.dimension)) as db:
+        assert db.lexical_search("alpha", exact=True)
+        assert db.stats().embedded == 0
+
+    class FakeEmbedder(Embedder):
+        @property
+        def dimension(self):
+            return cfg.embedding.dimension
+
+        def embed_passages(self, texts):
+            return [[1.0] + [0.0] * (self.dimension - 1) for _ in texts]
+
+        def embed_query(self, text):
+            return [1.0] + [0.0] * (self.dimension - 1)
+
+    monkeypatch.setattr(cli, "_embedder", lambda _cfg: FakeEmbedder())
+
+    def unexpected_scan(_self):
+        raise AssertionError("embedding-only phase must not scan source files")
+
+    monkeypatch.setattr(Indexer, "discover", unexpected_scan)
+    result = CliRunner().invoke(cli.app, ["index", "--embeddings-only", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    with closing(Database(cfg.db_path, cfg.embedding.dimension)) as db:
+        assert db.stats().embedded == 1
+
+    result = CliRunner().invoke(cli.app, ["index", "--embeddings-only", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "embedded 0 pending units" in result.output
+
+
+def test_index_rejects_conflicting_embedding_phases(tmp_path):
+    result = CliRunner().invoke(
+        cli.app,
+        ["index", "--embeddings-only", "--defer-embeddings", "--root", str(tmp_path)],
+    )
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output
 
 
 def test_status_json_output(tmp_path):

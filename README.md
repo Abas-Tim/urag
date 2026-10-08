@@ -74,7 +74,8 @@ Each indexed unit has three practical layers:
 | Evidence | Exact source lines on disk | Final context, loaded on demand |
 
 The index is stored per project in `.urag/index.db`. SQLite uses WAL mode, and
-new embeddings are written in batches of 64 units.
+new embeddings are checkpointed after each batch (8 units locally, 64 over HTTP
+by default).
 
 ## Installation
 
@@ -275,6 +276,8 @@ The default provider is a local ONNX model through FastEmbed:
 provider = "local"
 model = "BAAI/bge-base-en-v1.5"
 dimension = 768
+batch_size = 0
+threads = 0
 ```
 
 The model is downloaded on first use and cached in `%LOCALAPPDATA%/urag` on
@@ -309,6 +312,36 @@ model's files from the local cache, and saves the new configuration. The
 next `urag index` re-embeds everything with the new model; pass `--reindex`
 to do it in the same run, or `--keep-cache` to keep the old model's files.
 Mismatched `model`/`dimension` pairs are rejected at startup.
+
+### Faster Initial Indexing
+
+Indexing builds the lexical and graph index before loading the embedding model.
+Local passages are grouped by length to reduce padding, with 8-item batches by
+default. `batch_size = 0` selects the provider default (local: 8, HTTP: 64);
+`threads = 0` leaves ONNX threading automatic. These execution settings do not
+invalidate existing vectors:
+
+```bash
+urag embed --batch-size 16 --threads 8
+urag embed --batch-size 0 --threads 0
+```
+
+For large projects, finish the lexical/graph phase now and defer dense vectors:
+
+```bash
+urag init --full --defer-embeddings
+urag search "TokenValidator.validate" --mode lexical
+urag index --embeddings-only
+```
+
+`--defer-embeddings` is an alias of `--no-embed`, available on `init` and `index`.
+Lexical and graph queries do not load the embedding model. The embedding-only
+phase fills missing vectors from the existing index without scanning source
+files; run normal `urag index` instead if source files changed. Completed batches
+survive interruption, so repeating the command resumes pending work.
+
+See [profiling and measured performance](docs/performance.md) for the benchmark
+method, results, and commands to tune your hardware.
 
 Common local model choices:
 

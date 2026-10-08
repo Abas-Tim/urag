@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.2 - 2026-10-08
+
+- Initial indexing builds the lexical/graph index before loading the model.
+  `init --full --defer-embeddings` makes that phase independently usable;
+  `index --embeddings-only` resumes dense vectors without rescanning source.
+  CLI and MCP retrieval load models only when a dense operation needs them.
+- Local embedding batches default to 8 passages, grouped by length to reduce
+  padding. `urag embed --batch-size` and `--threads` expose execution tuning
+  without clearing vectors; HTTP defaults remain 64 passages per batch.
+  `scripts/profile_embeddings.py` measures throughput and fresh-index fixtures.
+- `urag eval` decodes ripgrep output as UTF-8 with replacement for invalid
+  bytes, preventing Windows locale-dependent decoding failures.
+- The chunk baseline caches embeddings in `.urag/eval-chunks.sqlite3`, keyed
+  by chunk content and embedding configuration. Repeat runs reuse unchanged
+  chunks; completed batches survive interrupted runs. Evaluation reports include
+  `chunk_cached_chunks`, and progress goes to stderr when using `--json`.
+- `init --full` prints and flushes its indexing and CPU-embedding notices before
+  loading the model. Indexing announces pending embeddings before the first batch.
+
 ## 0.4.1 - 2026-10-08
 
 - The "loading embedding model" notice is written to stderr, so

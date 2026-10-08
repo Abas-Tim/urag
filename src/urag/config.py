@@ -91,6 +91,12 @@ class EmbeddingConfig:
     http_api_key: str = ""
     http_model: str = ""
     http_timeout: float = 30.0
+    batch_size: int = 0
+    threads: int = 0
+
+    @property
+    def passage_batch_size(self) -> int:
+        return self.batch_size or (8 if self.provider == "local" else 64)
 
     def fingerprint(self) -> str:
         return "|".join(
@@ -157,6 +163,8 @@ class Config:
             f"http_api_key = {self.embedding.http_api_key!r}",
             f"http_model = {self.embedding.http_model!r}",
             f"http_timeout = {self.embedding.http_timeout}",
+            f"batch_size = {self.embedding.batch_size}",
+            f"threads = {self.embedding.threads}",
             "",
             "[index]",
             f"languages = {self.index.languages!r}",
@@ -198,6 +206,8 @@ def _parse_toml(path: Path, cfg: Config) -> None:
             "http_api_key",
             "http_model",
             "http_timeout",
+            "batch_size",
+            "threads",
         ):
             if k in emb:
                 setattr(cfg.embedding, k, emb[k])
@@ -234,6 +244,10 @@ def load_config(project_root: Path, create: bool = False) -> Config:
         _parse_toml(cfg_path, cfg)
     elif create:
         cfg.save()
+    for name in ("batch_size", "threads"):
+        value = getattr(cfg.embedding, name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"embedding.{name} must be a non-negative integer")
     return cfg
 
 

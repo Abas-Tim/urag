@@ -19,8 +19,6 @@ from .extractors import get_extractor
 from .git_aware import Git
 from .models import SourceFile, Unit
 
-BATCH = 64
-
 _WRITE_LOCK = threading.Lock()
 
 # Bump when extraction semantics change; existing indexes are fully
@@ -359,6 +357,21 @@ class Indexer:
 
     # ---------- embeddings ----------
 
+    def embed_pending(self) -> int:
+        """Fill missing vectors without discovering or re-extracting files."""
+        with _WRITE_LOCK:
+            started = time.monotonic()
+            count = self._embed_missing()
+            self.progress(f"embedded {count} pending units in {time.monotonic() - started:.1f}s")
+            return count
+
+    def pending_embedding_count(self) -> int:
+        return self.db.conn.execute(
+            "SELECT COUNT(*) FROM units u "
+            "WHERE u.id NOT IN (SELECT unit_id FROM vec_units) "
+            "AND (u.summary != '' OR u.concepts != '' OR u.qualname != '' OR u.signature != '')"
+        ).fetchone()[0]
+
     def _units_missing_embeddings(self) -> list[Unit]:
         rows = self.db.conn.execute(
             """
@@ -376,28 +389,33 @@ class Indexer:
         units = self._units_missing_embeddings()
         if not units:
             return 0
+        batch_size = self.embedder.batch_size
+        self.progress(f"embedding {len(units)} units (batch size {batch_size})...")
         lang_rows = dict(self.db.conn.execute("SELECT id, language FROM files").fetchall())
         path_rows = dict(self.db.conn.execute("SELECT id, path FROM files").fetchall())
         parent_rows = dict(
             self.db.conn.execute("SELECT id, qualname FROM units WHERE qualname != ''").fetchall()
         )
+
+        def passage(u: Unit) -> str:
+            return "\n".join(
+                part
+                for part in (
+                    f"file: {path_rows.get(u.file_id, '')}",
+                    f"language: {lang_rows.get(u.file_id, '')}",
+                    f"parent: {parent_rows.get(u.parent_id, '')}" if u.parent_id else "",
+                    u.retrieval_key,
+                )
+                if part
+            )
+
+        if self.embedder.group_by_length:
+            units.sort(key=lambda u: len(passage(u)))
         n = 0
         t0 = time.monotonic()
-        for i in range(0, len(units), BATCH):
-            batch = units[i : i + BATCH]
-            texts = [
-                "\n".join(
-                    part
-                    for part in (
-                        f"file: {path_rows.get(u.file_id, '')}",
-                        f"language: {lang_rows.get(u.file_id, '')}",
-                        f"parent: {parent_rows.get(u.parent_id, '')}" if u.parent_id else "",
-                        u.retrieval_key,
-                    )
-                    if part
-                )
-                for u in batch
-            ]
+        for i in range(0, len(units), batch_size):
+            batch = units[i : i + batch_size]
+            texts = [passage(u) for u in batch]
             vecs = self.embedder.embed_passages(texts)
             if len(vecs) != len(batch):
                 raise RuntimeError(

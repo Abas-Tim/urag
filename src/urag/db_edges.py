@@ -49,13 +49,24 @@ class _CallGraphMixin:
         self.conn.executemany(
             "INSERT INTO ref_edges(unit_id, file_id, ref, ref_full, kind, line, ref_unit_id) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-            [
-                (uid, file_id, ref, full, kind, line)
-                for uid, ref, full, kind, line in edges
-            ],
+            [(uid, file_id, ref, full, kind, line) for uid, ref, full, kind, line in edges],
         )
         if commit:
             self.conn.commit()
+
+    def symbol_ids(self, name: str) -> list[int]:
+        """Ids of symbol units whose name or qualname exactly matches `name`."""
+        name = name.strip()
+        if not name:
+            return []
+        return [
+            row["id"]
+            for row in self.conn.execute(
+                "SELECT id FROM units WHERE (name = ? OR qualname = ?) "
+                "AND kind = 'symbol' AND unit_type NOT IN ('import', 'config_key')",
+                (name, name),
+            ).fetchall()
+        ]
 
     def callers(self, name: str, limit: int = 30) -> list[dict]:
         """Units that call `name` (matches last segment or full chain).
@@ -69,14 +80,7 @@ class _CallGraphMixin:
         if not name:
             return []
         esc = re.escape(name).replace("%", r"\%").replace("_", r"\_")
-        exact_ids = [
-            row["id"]
-            for row in self.conn.execute(
-                "SELECT id FROM units WHERE (name = ? OR qualname = ?) "
-                "AND kind = 'symbol' AND unit_type NOT IN ('import', 'config_key')",
-                (name, name),
-            ).fetchall()
-        ]
+        exact_ids = self.symbol_ids(name)
         resolved_clause = ""
         resolved_params: list = []
         if exact_ids:
@@ -139,9 +143,7 @@ class _CallGraphMixin:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def transitive_callers(
-        self, name: str, max_depth: int = 3, limit: int = 30
-    ) -> list[dict]:
+    def transitive_callers(self, name: str, max_depth: int = 3, limit: int = 30) -> list[dict]:
         """BFS over call_edges: all transitive callers of `name` (callers-of-
         callers, ...). Each row gains `hop` (1 = direct caller). Cycles are
         handled via a visited set; each unit appears at its shortest hop."""
@@ -240,9 +242,7 @@ class _CallGraphMixin:
             "resolved_target": r["resolved_target"],
         }
 
-    def transitive_references(
-        self, name: str, max_depth: int = 3, limit: int = 30
-    ) -> list[dict]:
+    def transitive_references(self, name: str, max_depth: int = 3, limit: int = 30) -> list[dict]:
         """BFS over ref_edges: all transitive referencers of `name`. Each row
         gains `hop` (1 = direct referencer). Cycles handled via visited set."""
         name = name.strip()
@@ -267,9 +267,7 @@ class _CallGraphMixin:
             frontier = list(dict.fromkeys(nxt))
         return [visited[uid] for uid in visited][:limit]
 
-    def unreferenced_symbols(
-        self, limit: int = 50, language: str | None = None
-    ) -> list[dict]:
+    def unreferenced_symbols(self, limit: int = 50, language: str | None = None) -> list[dict]:
         """Candidate dead symbols: symbol units with no incoming call edges
         and no incoming reference edges. Excludes imports, config keys and
         test files. Heuristic only — dynamic dispatch, reflection, XAML
@@ -325,4 +323,3 @@ class _CallGraphMixin:
             }
             for r in rows
         ]
-

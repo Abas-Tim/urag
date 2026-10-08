@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.4.0 - 2026-10-07
+
+C/C++ coverage and graph fixes (found while dogfooding on a C++/Vulkan
+JPEG XL encoder):
+
+- C++ `extern "C"` blocks are now indexed. The C grammar turned
+  `extern "C" { ... }` into ERROR nodes, so entire public C API surfaces were
+  invisible; `.h` files are now parsed with the C++ grammar (a C superset
+  that also handles `#ifdef`-guarded `extern "C"`), and `linkage_specification`
+  plus `preproc_if`/`preproc_ifdef` bodies are walked. Call edges inside
+  these blocks now resolve (impact analysis is no longer silently
+  incomplete).
+- Header API surface is searchable: `typedef enum`/`typedef struct` inside
+  preprocessor guards are extracted (enumerator names land in the signature),
+  and function prototypes in headers become `function` units, so
+  `urag resolve gjxl_encode_rgb8` finds the declaration even before the
+  definition.
+- `urag dependents` works for C/C++: include units are matched by
+  path-component suffix (`src/encoder/foo.h` matches
+  `#include "encoder/foo.h"`), and symbol targets fall back to the
+  dependents of the defining file plus files that reference/call the symbol.
+- C/C++ reference edges: type mentions (`TreeMode mode`),
+  qualified uses (`TreeMode::kSingle`), and `new` constructions now
+  produce `ref_edges`, so `urag references <Type>` works in C++ projects.
+- New languages (no new dependencies): GLSL (`.comp`, `.glsl`, ... parsed with
+  the C++ grammar), CMake (`CMakeLists.txt`/`.cmake` → `option`/`set`/targets/
+  tests/dependencies as units), PowerShell (`.ps1`/`.psm1` function
+  definitions), and `.inc` files (as C++). `urag doctor` hints when a
+  language present on disk is missing from `index.languages`.
+- `urag callees` accepts a symbol name (not only a unit id), matching
+  `callers`.
+- Windows: piping output into a consumer that exits early
+  (`... | Select-Object -First N`) no longer crashes with
+  `OSError [Errno 22]` from rich's legacy console renderer;
+  closed-pipe writes are silently dropped.
+- `urag eval` fails loudly when `rg`/`read` baselines are requested but
+  ripgrep is not installed, instead of scoring the baseline 0.00.
+- Extractor version bumped to 4; existing indexes re-extract automatically.
+
 ## 0.3.0 - 2026-10-06
 
 - Retrieval transparency: search responses now report `mode_requested`

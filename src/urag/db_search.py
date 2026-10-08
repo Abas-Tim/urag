@@ -259,10 +259,13 @@ class _SearchMixin:
         """Files/units that import a module or symbol (dependents).
 
         Matches import_aliases targets and import-unit qualnames against
-        `target` (exact or sub-module prefix)."""
+        `target` (exact or sub-module prefix). C/C++ `#include` targets are
+        matched by path-component suffix: a query for
+        `src/encoder/foo.h` finds files with `#include "encoder/foo.h"`."""
         target = target.strip()
         if not target:
             return []
+        target = target.replace("\\", "/").removeprefix("./")
         esc = target.replace("%", r"\%").replace("_", r"\_")
         out: dict[str, dict] = {}
         rows = self.conn.execute(
@@ -291,4 +294,38 @@ class _SearchMixin:
             key = r["path"]
             if key not in out or out[key]["unit_id"] is None:
                 out.setdefault(key, dict(r))
+        # include-style suffix matching (C/C++, and quoted
+        # import qualnames that carry quotes/angle brackets)
+        base = target.rsplit("/", 1)[-1]
+        if base:
+            irows = self.conn.execute(
+                """
+                SELECT u.id AS unit_id, f.path, '' AS alias, u.qualname AS target, f."commit"
+                FROM units u JOIN files f ON f.id = u.file_id
+                WHERE u.unit_type = 'import' AND u.qualname LIKE ? ESCAPE '\\'
+                ORDER BY f.path
+                """,
+                (f"%{base.replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%",),
+            ).fetchall()
+            tparts = [p for p in target.split("/") if p]
+            for r in irows:
+                inc = r["target"].strip().strip('"<> ')
+                if not inc:
+                    continue
+                iparts = [p for p in inc.split("/") if p]
+                n = min(len(tparts), len(iparts))
+                if n and tparts[-n:] == iparts[-n:]:
+                    key = r["path"]
+                    if key not in out or out[key]["unit_id"] is None:
+                        out.setdefault(key, dict(r))
+        if not out:
+            # symbol target: fall back to dependents of the defining file
+            srow = self.conn.execute(
+                "SELECT f.path FROM units u JOIN files f ON f.id = u.file_id "
+                "WHERE u.kind = 'symbol' AND u.unit_type NOT IN ('import', 'config_key') "
+                "AND (u.name = ? OR u.qualname = ?) LIMIT 1",
+                (target, target),
+            ).fetchone()
+            if srow and srow["path"] != target:
+                return self.importers(srow["path"], limit=limit)
         return list(out.values())[:limit]

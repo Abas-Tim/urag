@@ -20,6 +20,7 @@ import math
 import os
 import random
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -944,6 +945,12 @@ def run_eval(
     qs = [resolve_question(db, q) for q in qs]
 
     chosen = (systems or "urag-auto,urag-hybrid,urag-lexical,rg,chunk").split(",")
+    if ("rg" in chosen or "read" in chosen) and shutil.which("rg") is None:
+        raise RuntimeError(
+            "rg baseline requested but ripgrep (rg) is not on PATH; "
+            "install ripgrep or remove 'rg' (and 'read', which shells out to it) "
+            "from --systems"
+        )
     retriever = Retriever(cfg, db, embedder, Git(cfg.project_root))
     rg = RgBaseline(cfg.project_root)
     read = ReadBaseline(cfg.project_root) if "read" in chosen else None

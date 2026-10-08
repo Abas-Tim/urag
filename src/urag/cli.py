@@ -36,6 +36,39 @@ from .indexer import Indexer, coverage_report
 from .retrieve import Retriever
 from .watcher import run_watch
 
+
+class _ClosedPipeSafe:
+    """Wrapper that turns closed-pipe OSError (Windows raises errno 22 instead
+    of BrokenPipeError) into silent no-ops, so piping into a consumer that
+    exits early (head/Select-Object -First) never crashes or prints a
+    traceback."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+    def write(self, data):
+        try:
+            return self._stream.write(data)
+        except OSError:
+            return len(data)
+
+    def writelines(self, lines):
+        try:
+            return self._stream.writelines(lines)
+        except OSError:
+            return None
+
+    def flush(self):
+        with contextlib.suppress(OSError):
+            self._stream.flush()
+
+
+sys.stdout = _ClosedPipeSafe(sys.stdout)
+sys.stderr = _ClosedPipeSafe(sys.stderr)
+
 app = typer.Typer(
     help="urag: structure-aware, token-efficient RAG for projects", no_args_is_help=True
 )
@@ -461,6 +494,9 @@ def eval_cmd(
             reresolve=reresolve,
             console=console,
         )
+    except RuntimeError as exc:
+        error_console.print(f"[red]error: {exc}[/red]")
+        raise typer.Exit(2) from exc
     finally:
         db.close()
 
@@ -678,7 +714,7 @@ def resolve(
 
 @app.command()
 def callees(
-    unit_id: int = typer.Argument(..., help="unit id from search results"),
+    target: str = typer.Argument(..., help="unit id (from search) or symbol name"),
     root: Path = typer.Option(".", help="project root"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ):
@@ -687,10 +723,26 @@ def callees(
 
     cfg, db = _engine(root)
     try:
-        result = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root)).callees(unit_id)
-        if result is None:
-            error_console.print("[yellow]unit not found[/yellow]")
-            raise typer.Exit(1)
+        retriever = Retriever(cfg, db, _embedder(cfg), Git(cfg.project_root))
+        if target.strip().isdigit():
+            result = retriever.callees(int(target))
+            if result is None:
+                error_console.print("[yellow]unit not found[/yellow]")
+                raise typer.Exit(1)
+        else:
+            ids = db.symbol_ids(target)
+            if not ids:
+                error_console.print(f"[yellow]no definition found for {target}[/yellow]")
+                raise typer.Exit(1)
+            if len(ids) > 1:
+                console.print(
+                    f"[dim]{len(ids)} definitions for {target}; "
+                    f"using unit {ids[0]} (see `urag resolve {target}`)[/dim]"
+                )
+            result = retriever.callees(ids[0])
+            if result is None:
+                error_console.print("[yellow]unit not found[/yellow]")
+                raise typer.Exit(1)
         if json_out:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
@@ -916,6 +968,14 @@ def doctor(
                 ".urag/urag.toml and re-run `urag index` to close the markup blind spot"
             )
             hints.append(hint)
+    if coverage["counts"]["language_disabled"]:
+        langs = ", ".join(coverage["disabled_languages"])
+        hints.append(
+            f"{coverage['counts']['language_disabled']} file(s) skipped because their "
+            f"language ({langs}) is not in index.languages (config may predate "
+            "new language support); add the languages to .urag/urag.toml and "
+            "re-run `urag index`"
+        )
     embedding: dict = {"provider": cfg.embedding.provider}
     if cfg.embedding.provider == "local":
         cache = default_model_cache_dir()

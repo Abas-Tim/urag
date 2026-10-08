@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-10-08
+
+- The "loading embedding model" notice is written to stderr, so
+  `urag search --json` (and other `--json` commands) emit pure JSON on
+  stdout even when a local embedding model is configured. Found while
+  re-verifying 0.4.0 on a real C++ project.
+
 ## 0.4.0 - 2026-10-07
 
 C/C++ coverage and graph fixes (found while dogfooding on a C++/Vulkan

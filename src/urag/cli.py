@@ -137,7 +137,7 @@ def _embedder(cfg: Config) -> Embedder:
     if key in _embedder_cache:
         return _embedder_cache[key]
     if cfg.embedding.provider == "local":
-        _flush_progress(
+        error_console.print(
             f"[dim]loading embedding model {cfg.embedding.model} "
             "(first run downloads it, may take a while)...[/dim]"
         )

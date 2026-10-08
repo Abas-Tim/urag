@@ -47,8 +47,14 @@ SUPPORTED_LANGUAGES = {
     "rust": {"ext": (".rs",), "kind": "source"},
     "java": {"ext": (".java",), "kind": "source"},
     "c": {"ext": (".c", ".h"), "kind": "source"},
-    "cpp": {"ext": (".cpp", ".cc", ".cxx", ".hpp", ".hh"), "kind": "source"},
+    "cpp": {"ext": (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".inc"), "kind": "source"},
     "csharp": {"ext": (".cs",), "kind": "source"},
+    "glsl": {
+        "ext": (".glsl", ".comp", ".vert", ".frag", ".geom", ".tesc", ".tese"),
+        "kind": "source",
+    },
+    "cmake": {"ext": (".cmake",), "kind": "config"},
+    "powershell": {"ext": (".ps1", ".psm1"), "kind": "source"},
     "xml": {
         "ext": (".xaml", ".axaml", ".xml", ".csproj", ".props", ".targets"),
         "kind": "source",
@@ -67,6 +73,8 @@ def language_for_path(path: Path) -> tuple[str, str] | None:
     name = path.name.lower()
     if name == ".env" or name.startswith(".env."):
         return "env", "config"
+    if name == "cmakelists.txt":
+        return "cmake", "config"
     ext = path.suffix.lower()
     for lang, spec in SUPPORTED_LANGUAGES.items():
         if ext in spec["ext"]:
@@ -232,11 +240,7 @@ def load_config(project_root: Path, create: bool = False) -> Config:
 def ensure_gitignore(project_root: Path) -> bool:
     gitignore = project_root / ".gitignore"
     entry = f"{UURAG_DIR}/"
-    content = (
-        gitignore.read_text(encoding="utf-8", errors="replace")
-        if gitignore.exists()
-        else ""
-    )
+    content = gitignore.read_text(encoding="utf-8", errors="replace") if gitignore.exists() else ""
     if entry in content.splitlines():
         return False
     prefix = content.rstrip()

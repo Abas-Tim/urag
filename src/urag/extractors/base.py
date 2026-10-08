@@ -59,11 +59,7 @@ def valid_aliases(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
     out: dict[str, str] = {}
     for alias, target in pairs:
-        if (
-            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias)
-            and target
-            and alias not in out
-        ):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias) and target and alias not in out:
             out[alias] = target
     return list(out.items())
 
@@ -131,6 +127,8 @@ def leading_comments(source_lines: list[str], start_line: int, marker: str) -> s
         stripped = source_lines[i].strip()
         if _is_comment_line(stripped, marker):
             cleaned = stripped.strip("/*").strip().lstrip("*").strip()
+            if marker == "#":
+                cleaned = cleaned.lstrip("#").strip()
             out.append(cleaned)
             i -= 1
         elif stripped == "" and out:

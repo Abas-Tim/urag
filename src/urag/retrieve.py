@@ -888,10 +888,33 @@ class Retriever:
         }
 
     def dependents(self, target: str, limit: int = 50) -> dict:
+        results = self.db.importers(target, limit=limit)
+        seen = {r["path"] for r in results}
+        exact = self.db.symbol_ids(target)
+        if exact:
+            for rows in (
+                self.db.references(target, limit=limit),
+                self.db.callers(target, limit=limit),
+            ):
+                for r in rows:
+                    path = r["path"]
+                    if path not in seen:
+                        seen.add(path)
+                        results.append(
+                            {
+                                "path": path,
+                                "alias": "",
+                                "target": target,
+                                "unit_id": None,
+                                "commit": "",
+                            }
+                        )
+                    if len(results) >= limit:
+                        break
         return {
             "target": target,
-            "count": 0,
-            "results": self.db.importers(target, limit=limit),
+            "count": len(results),
+            "results": results[:limit],
         }
 
     def list_files(self, language: str | None = None) -> dict:

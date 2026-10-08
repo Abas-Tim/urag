@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from ..models import UNIT_KIND_SYMBOL, Unit
-from .base import ByteIndexedSource, Extractor, collapse_ws, walk_calls
+from ..models import UNIT_KIND_SYMBOL, Reference, Unit
+from .base import ByteIndexedSource, Extractor, collapse_ws, dedupe_refs, walk_calls
 from .native_common import _IDENT_TYPES, _concepts, _field, _make, _parser, _point
+
+_HEADER_EXTS = (".h", ".hpp", ".hh", ".inc")
 
 
 class CExtractor(Extractor):
@@ -15,13 +17,25 @@ class CExtractor(Extractor):
     def __init__(self, language: str = "c"):
         self.language = language
         self._class_qualnames: set[str] = set()
+        self._is_header = False
+        self._active = language
+
+    def _parser_language(self, rel_path: str) -> str:
+        # Headers (and GLSL/.inc C-family files) are parsed with
+        # the C++ grammar: it is a near-superset of C and, crucially, parses
+        # `extern "C"` linkage blocks that the C grammar turns into ERROR nodes.
+        if self.language == "c" and rel_path.lower().endswith(_HEADER_EXTS):
+            return "cpp"
+        return self.language
 
     def extract(self, source: str, rel_path: str) -> list[Unit]:
         source = ByteIndexedSource(source)
-        tree = _parser(self.language).parse(source.encode("utf-8"))
+        self._active = self._parser_language(rel_path)
+        tree = _parser(self._active).parse(source.encode("utf-8"))
         lines = source.splitlines()
         units: list[Unit] = []
         self._class_qualnames.clear()
+        self._is_header = rel_path.lower().endswith(_HEADER_EXTS)
         self._walk(tree.root_node, source, lines, prefix="", units=units)
         return units
 
@@ -32,6 +46,21 @@ class CExtractor(Extractor):
             t = child.type
             if t == "function_definition":
                 self._append_function(units, self._func(child, source, lines, prefix))
+            elif t == "linkage_specification":
+                # extern "C" { ... } / extern "C" decl;
+                decl_list = next(
+                    (c for c in child.named_children if c.type == "declaration_list"),
+                    None,
+                )
+                if decl_list:
+                    self._walk(decl_list, source, lines, prefix, units)
+                else:
+                    self._walk(child, source, lines, prefix, units)
+            elif t in ("preproc_if", "preproc_ifdef"):
+                # declarations guarded by #ifdef / #if are still real symbols
+                self._walk(child, source, lines, prefix, units)
+            elif t == "declaration" and self._is_header:
+                self._prototype(child, source, lines, prefix, units)
             elif t == "template_declaration":
                 decl = next(
                     (
@@ -83,10 +112,114 @@ class CExtractor(Extractor):
 
     def collect_calls(self, source: str) -> list:
         source = ByteIndexedSource(source)
-        tree = _parser(self.language).parse(source.encode("utf-8"))
+        tree = _parser(self._active).parse(source.encode("utf-8"))
         out: list = []
         walk_calls(tree.root_node, source, {"call_expression"}, out)
         return out
+
+    def collect_references(self, source: str) -> list:
+        """Type references in C/C++: type mentions in signatures
+        and bodies (`TreeMode mode`), qualified uses (`TreeMode::kSingle`),
+        and constructions (`new T`). Parsed with the same grammar as extract()."""
+        source = ByteIndexedSource(source)
+        tree = _parser(self._active).parse(source.encode("utf-8"))
+        out: list = []
+        stack: list[Node] = [tree.root_node]
+        while stack:
+            cur = stack.pop()
+            t = cur.type
+            if t == "type_identifier":
+                parent = cur.parent
+                if parent is not None and parent.child_by_field_name("name") == cur:
+                    stack.extend(reversed(cur.named_children))
+                    continue  # the definition's own name is not a reference
+                text = source[cur.start_byte : cur.end_byte]
+                out.append(
+                    Reference(
+                        target=text,
+                        target_full=text,
+                        kind="type",
+                        line=cur.start_point.row + 1,
+                        byte_start=cur.start_byte,
+                        byte_end=cur.end_byte,
+                    )
+                )
+            elif t in ("qualified_identifier", "scoped_identifier"):
+                scope = cur.child_by_field_name("scope") or cur.child_by_field_name("namespace")
+                if scope is not None and scope.type in _IDENT_TYPES | {
+                    "qualified_identifier",
+                    "namespace_identifier",
+                }:
+                    scope_text = source[scope.start_byte : scope.end_byte]
+                    out.append(
+                        Reference(
+                            target=scope_text.rsplit("::", 1)[-1],
+                            target_full=scope_text,
+                            kind="type",
+                            line=cur.start_point.row + 1,
+                            byte_start=cur.start_byte,
+                            byte_end=cur.end_byte,
+                        )
+                    )
+            elif t in ("new_expression", "qualified_new_expression"):
+                type_node = cur.child_by_field_name("type")
+                if type_node is not None:
+                    text = source[type_node.start_byte : type_node.end_byte]
+                    out.append(
+                        Reference(
+                            target=text.rsplit("::", 1)[-1].rstrip("*"),
+                            target_full=text,
+                            kind="construct",
+                            line=cur.start_point.row + 1,
+                            byte_start=cur.start_byte,
+                            byte_end=cur.end_byte,
+                        )
+                    )
+            stack.extend(reversed(cur.named_children))
+        return dedupe_refs(out)
+
+    def _prototype(
+        self, n: Node, source: str, lines: list[str], prefix: str, units: list[Unit]
+    ) -> None:
+        """Function declaration (no body) in a header: searchable API surface."""
+        declarator = n.child_by_field_name("declarator")
+        if declarator is None:
+            return
+        params = next(
+            (
+                c
+                for c in self._descendants(declarator)
+                if c.type in ("parameter_list", "parameters_and_qualifiers")
+            ),
+            None,
+        )
+        if not any(c.type == "function_declarator" for c in self._descendants(declarator)):
+            return
+        name = self._declarator_name(declarator, params, source)
+        if name == "anonymous":
+            return
+        qualname = f"{prefix}{name}" if prefix else name
+        units.append(
+            _make(
+                n,
+                source,
+                lines,
+                "",
+                "function",
+                name,
+                qualname,
+                body=None,
+                concepts=_concepts(params or declarator, source),
+            )
+        )
+
+    @staticmethod
+    def _descendants(n: Node):
+        stack = [n]
+        while stack:
+            cur = stack.pop()
+            yield cur
+            stack.extend(cur.named_children)
 
     def _func(
         self,
@@ -233,7 +366,19 @@ class CExtractor(Extractor):
             ),
             None,
         )
-        units.append(_make(n, source, lines, "", "typedef", name, qualname, body))
+        units.append(
+            _make(
+                n,
+                source,
+                lines,
+                "",
+                "typedef",
+                name,
+                qualname,
+                body,
+                concepts=_concepts(n, source, limit=12),
+            )
+        )
 
     def _import(self, n: Node, source: str) -> Unit:
         name = source[n.start_byte : n.end_byte].replace("#include", "").strip()
@@ -254,5 +399,3 @@ class CExtractor(Extractor):
             byte_start=n.start_byte,
             byte_end=n.end_byte,
         )
-
-

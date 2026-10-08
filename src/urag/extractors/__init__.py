@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .base import Extractor
+from .cmake_ext import CMakeExtractor
 from .config_ext import ConfigExtractor
 from .markdown_ext import MarkdownExtractor
 from .native_ext import (
@@ -12,6 +13,7 @@ from .native_ext import (
     JavaExtractor,
     RustExtractor,
 )
+from .powershell_ext import PowerShellExtractor
 from .python_ext import PythonExtractor
 from .ts_ext import TsExtractor
 from .xml_ext import XmlExtractor
@@ -32,7 +34,10 @@ _REGISTRY: dict[str, Extractor] = {
     "java": JavaExtractor(),
     "c": CExtractor("c"),
     "cpp": CExtractor("cpp"),
+    "glsl": CExtractor("cpp"),
     "csharp": CSharpExtractor(),
+    "cmake": CMakeExtractor(),
+    "powershell": PowerShellExtractor(),
     "xml": XmlExtractor(),
 }
 

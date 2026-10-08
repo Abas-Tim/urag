@@ -25,7 +25,7 @@ _WRITE_LOCK = threading.Lock()
 
 # Bump when extraction semantics change; existing indexes are fully
 # re-extracted (embeddings for unchanged retrieval keys are preserved).
-EXTRACTOR_VERSION = "2"
+EXTRACTOR_VERSION = "4"
 
 Progress = Callable[[str], None]
 

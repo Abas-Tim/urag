@@ -20,6 +20,7 @@ from urag.eval import (
     load_questions,
     reresolve_questions,
     resolve_question,
+    run_eval,
     scan_import_aliases,
 )
 from urag.indexer import Indexer
@@ -60,14 +61,28 @@ def test_autogen_and_resolve(db):
             assert rq.query == "what calls alpha"
 
 
+def test_eval_errors_when_rg_missing(tmp_path, monkeypatch):
+    """A missing ripgrep must fail loudly, not score the rg baseline 0.00."""
+    monkeypatch.setattr("urag.eval.shutil.which", lambda name: None)
+    cfg = load_config(tmp_path)
+    cfg.embedding.provider = "none"
+    cfg.save()
+    (tmp_path / "m.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    try:
+        Indexer(cfg, db, NoopEmbedder()).index_all()
+        with pytest.raises(RuntimeError, match="ripgrep"):
+            run_eval(cfg, db, NoopEmbedder(), autogen=1, systems="urag-auto,rg")
+    finally:
+        db.close()
+
+
 def test_autogen_skips_ambiguous_definitions(db):
     root = db.db_path.parent.parent
     (root / "other.py").write_text("def alpha():\n    return 2\n", encoding="utf-8")
     Indexer(load_config(root), db, NoopEmbedder()).index_all()
 
-    definitions = [
-        q.query for q in autogen_questions(db, 20) if q.label == "definition"
-    ]
+    definitions = [q.query for q in autogen_questions(db, 20) if q.label == "definition"]
 
     assert "where is alpha defined" not in definitions
 
@@ -77,18 +92,14 @@ def test_reresolve_drops_ambiguous_definition(db):
     (root / "other.py").write_text("def alpha():\n    return 2\n", encoding="utf-8")
     Indexer(load_config(root), db, NoopEmbedder()).index_all()
 
-    question = Question(
-        query="where is alpha defined", label="definition", gold_file="m.py"
-    )
+    question = Question(query="where is alpha defined", label="definition", gold_file="m.py")
 
     assert reresolve_questions(db, [question]) == []
 
 
 def test_callers_gold(db):
     # what calls alpha -> caller = Beta.go
-    qs = [
-        q for q in autogen_questions(db, 10) if q.label == "call" and "alpha" in q.query
-    ]
+    qs = [q for q in autogen_questions(db, 10) if q.label == "call" and "alpha" in q.query]
     assert qs
     resolved = resolve_question(db, qs[0])
     u, _, _ = db.unit_by_id(resolved.gold_unit_ids[0])
@@ -149,9 +160,9 @@ def test_rg_path_normalization():
 
 
 def test_eval_alias_scan_uses_imported_symbol():
-    assert scan_import_aliases(
-        "from core.http import fetch as http_fetch", "python"
-    ) == {"http_fetch": "core.http.fetch"}
+    assert scan_import_aliases("from core.http import fetch as http_fetch", "python") == {
+        "http_fetch": "core.http.fetch"
+    }
 
 
 def test_oracle_rejects_path_traversal(db, tmp_path):

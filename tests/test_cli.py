@@ -30,6 +30,30 @@ def test_get_missing_unit_exits_without_traceback(tmp_path):
     assert "TypeError" not in result.output
 
 
+def test_callees_accepts_symbol_name(tmp_path):
+    (tmp_path / "m.py").write_text(
+        "def alpha(x):\n    return x + 1\n\n\ndef beta():\n    return alpha(1)\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    cfg.embedding.provider = "none"
+    cfg.save()
+    db = Database(cfg.db_path, cfg.embedding.dimension)
+    Indexer(cfg, db, NoopEmbedder()).index_all()
+    db.close()
+
+    result = CliRunner().invoke(cli.app, ["callees", "beta", "--root", str(tmp_path), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["qualname"] == "beta"
+    assert any(c["callee"] == "alpha" for c in payload["callees"])
+
+    missing = CliRunner().invoke(cli.app, ["callees", "nope", "--root", str(tmp_path)])
+    assert missing.exit_code == 1
+    assert "no definition found" in missing.output
+
+
 def test_embedding_warning_is_written_to_stderr(tmp_path, monkeypatch, capsys):
     cfg = load_config(tmp_path)
     cfg.embedding.provider = "local"
@@ -75,7 +99,7 @@ def test_doctor_json_output(tmp_path):
 def test_doctor_reports_coverage_by_reason(tmp_path):
     _empty_index(tmp_path)
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "script.ps1").write_text("Write-Host 'hi'\n", encoding="utf-8")
+    (tmp_path / "data.xyz").write_text("binary-ish\n", encoding="utf-8")
     cfg = load_config(tmp_path)
     db = Database(cfg.db_path, cfg.embedding.dimension)
     Indexer(cfg, db, NoopEmbedder()).index_all()
@@ -87,8 +111,8 @@ def test_doctor_reports_coverage_by_reason(tmp_path):
     coverage = json.loads(result.output)["coverage"]
     assert coverage["counts"]["indexed"] == 1
     assert coverage["counts"]["unsupported_extension"] == 1
-    assert coverage["unsupported_extensions"][".ps1"] == 1
-    assert coverage["examples"]["unsupported_extension"] == ["script.ps1"]
+    assert coverage["unsupported_extensions"][".xyz"] == 1
+    assert coverage["examples"]["unsupported_extension"] == ["data.xyz"]
 
 
 def test_read_json_output(tmp_path):
